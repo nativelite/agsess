@@ -1,0 +1,20 @@
+[package]
+name = "agsess"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.70"
+description = "Local agent session state: the JSONL transcripts a coding-agent CLI writes to the user's own disk in, a snapshot of AgentSessions (with a derived attention Status) out. Zero third-party dependencies — depends only on the nativelite json crate."
+license = "MIT"
+repository = "https://github.com/nativelite/agsess"
+keywords = ["agents", "session", "claude", "transcript", "nativelite"]
+categories = ["command-line-utilities", "parser-implementations"]
+
+# nativelite core rule: ZERO third-party dependencies. The only dependency
+# allowed is the org crate `json` (the app-variant rule): do not add anything
+# from crates.io here.
+[dependencies]
+json = { git = "https://github.com/nativelite/json-rs", branch = "main" }
+
+[lib]
+name = "agsess"
+path = "src/lib.rs"

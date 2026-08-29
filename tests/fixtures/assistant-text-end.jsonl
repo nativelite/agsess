@@ -1,0 +1,3 @@
+{"type":"permission-mode","permissionMode":"default","sessionId":"fix3"}
+{"type":"user","timestamp":"2026-08-29T12:00:00.000Z","cwd":"/home/dev/proj","message":{"role":"user","content":"summarize"}}
+{"type":"assistant","timestamp":"2026-08-29T12:00:01.000Z","cwd":"/home/dev/proj","message":{"model":"claude-opus-4-8","usage":{"input_tokens":10,"output_tokens":5},"content":[{"type":"text","text":"All done — 42 tests pass."}]}}

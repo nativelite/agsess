@@ -1,0 +1,415 @@
+//! Session discovery, incremental tailing, and attention-status derivation.
+//!
+//! A [`World`] scans a Claude Code projects root
+//! (`~/.claude/projects/*/<session>.jsonl`), keeps one [`AgentSession`] per
+//! transcript, and on each [`refresh`](World::refresh) reads only the bytes
+//! appended since last time — a partial trailing line is buffered until its
+//! newline arrives. A truncated/rewritten file resets and re-aggregates.
+//!
+//! Ported from agtop's `sessions.rs` (`Session` renamed [`AgentSession`]),
+//! then extended with [`Vendor`], the attention [`Status`] derived from the
+//! transcript tail (§2.4 of the amux-0.3 design), a `first_seen_ms` stamp, and
+//! [`World::refresh_since`] for a bounded cold start. The incremental-tail
+//! state (`offset`, `partial`) and the status-tracking fields stay private —
+//! that machinery is the crate's value and neither app should reimplement it.
+
+use crate::claude::{self, Kind, Tail};
+use std::collections::VecDeque;
+use std::io::{Read, Seek, SeekFrom};
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Which agent CLI produced a session. An enum, not a trait, in v1: `Vendor`
+/// is on every session from day one so the UI/binder never change when a
+/// second vendor lands, and adding a variant produces a compile error at
+/// exactly the `match` sites that must change (§6 of the design).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Vendor {
+    ClaudeCode,
+}
+
+/// The attention status derived from a session's transcript tail. This is the
+/// public contract; *how* it is derived (the dwell heuristic below) is private
+/// to the adapter and may be replaced by a hook-fed path later.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Status {
+    /// An assistant turn / tool is in flight.
+    Working,
+    /// A tool call was requested and not resolved, in a mode that prompts,
+    /// and it has dwelled long enough to be a human wait (not a slow tool).
+    WaitingApproval,
+    /// The turn ended cleanly on a text block; the agent wants a human message.
+    WaitingPrompt,
+    /// Nothing recent enough to claim either way.
+    Idle,
+}
+
+/// Dwell before an unresolved `tool_use` in a prompting mode is read as a
+/// human wait rather than a slow tool. 6–8 s band (founder call); tunable.
+pub const APPROVAL_DWELL_MS: u64 = 7_000;
+
+/// A session with no activity within this window of `now` is [`Status::Idle`].
+/// One minute: long enough not to flap a briefly-quiet agent, short enough
+/// that a truly stopped session greys out promptly.
+pub const IDLE_MS: u64 = 60_000;
+
+/// Permission modes that actually prompt the human on a tool call. Only in
+/// these does an unresolved `tool_use` past the dwell escalate to
+/// `WaitingApproval`; the auto-approving modes stay `Working`.
+fn mode_prompts(mode: Option<&str>) -> bool {
+    matches!(mode, Some("default") | Some("plan"))
+}
+
+/// Aggregated view of one session transcript.
+#[derive(Debug)]
+pub struct AgentSession {
+    pub vendor: Vendor,
+    pub path: PathBuf,
+    pub id: String,
+    pub project_dir: String,
+    pub cwd: Option<String>,
+    pub branch: Option<String>,
+    pub model: Option<String>,
+    pub status: Status,
+    pub user_msgs: u64,
+    pub assistant_msgs: u64,
+    pub tokens_in: u64,
+    pub tokens_out: u64,
+    pub last_ts_ms: Option<u64>,
+    pub last_action: String,
+    /// Most recent action lines, newest last (bounded).
+    pub recent: VecDeque<String>,
+    pub mtime_ms: u64,
+    /// When this process first observed the transcript file (§3 of the design).
+    pub first_seen_ms: u64,
+    pub subagents_total: usize,
+    pub subagents_active: usize,
+    offset: u64,
+    partial: Vec<u8>,
+    // --- private status-derivation state, updated line by line ---
+    /// Last permission mode seen (from `permission-mode` records or the
+    /// inline `permissionMode` on `user` lines).
+    perm_mode: Option<String>,
+    /// The kind of the most recent user/assistant line.
+    last_kind: Option<Kind>,
+    /// The tail shape of the most recent user/assistant line.
+    last_tail: Tail,
+    /// Ids of `tool_use` calls not yet matched by a `tool_result`.
+    open_tools: Vec<String>,
+    /// Timestamp (ms) of the currently-unresolved trailing `tool_use`, if the
+    /// last line is that call — the anchor for the dwell gate.
+    pending_tool_ts: Option<u64>,
+}
+
+const RECENT_KEEP: usize = 6;
+/// A subagent transcript touched within this window counts as active.
+const SUBAGENT_ACTIVE_MS: u64 = 120_000;
+
+impl AgentSession {
+    fn new(path: PathBuf, id: String, project_dir: String) -> AgentSession {
+        AgentSession {
+            vendor: Vendor::ClaudeCode,
+            path,
+            id,
+            project_dir,
+            cwd: None,
+            branch: None,
+            model: None,
+            status: Status::Idle,
+            user_msgs: 0,
+            assistant_msgs: 0,
+            tokens_in: 0,
+            tokens_out: 0,
+            last_ts_ms: None,
+            last_action: String::new(),
+            recent: VecDeque::new(),
+            mtime_ms: 0,
+            first_seen_ms: 0,
+            subagents_total: 0,
+            subagents_active: 0,
+            offset: 0,
+            partial: Vec::new(),
+            perm_mode: None,
+            last_kind: None,
+            last_tail: Tail::None,
+            open_tools: Vec::new(),
+            pending_tool_ts: None,
+        }
+    }
+
+    /// Display name: the basename of the session's working directory when
+    /// known (the transcript records the real path), else the storage
+    /// directory name Claude Code munged the path into.
+    pub fn project_name(&self) -> String {
+        match &self.cwd {
+            Some(cwd) => Path::new(cwd)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| cwd.clone()),
+            None => self.project_dir.clone(),
+        }
+    }
+
+    fn reset(&mut self) {
+        let (path, id, dir) = (self.path.clone(), self.id.clone(), self.project_dir.clone());
+        let first_seen = self.first_seen_ms;
+        *self = AgentSession::new(path, id, dir);
+        self.first_seen_ms = first_seen; // a rewrite is still the same observed file
+    }
+
+    fn apply(&mut self, ev: claude::LineEvent) {
+        match ev.kind {
+            Kind::User => self.user_msgs += 1,
+            Kind::Assistant => self.assistant_msgs += 1,
+            Kind::Other => {}
+        }
+        self.tokens_in += ev.tokens_in;
+        self.tokens_out += ev.tokens_out;
+        if ev.ts_ms.is_some() {
+            self.last_ts_ms = ev.ts_ms;
+        }
+        if let Some(m) = ev.model {
+            self.model = Some(m);
+        }
+        if let Some(c) = ev.cwd {
+            self.cwd = Some(c);
+        }
+        if let Some(b) = ev.branch {
+            self.branch = Some(b);
+        }
+        if let Some(pm) = ev.permission_mode {
+            self.perm_mode = Some(pm);
+        }
+        // --- status tracking (§2.4) -------------------------------------
+        // Resolve/track tool calls regardless of which line they arrive on.
+        match &ev.tail {
+            Tail::ToolUse(id) => {
+                if !id.is_empty() {
+                    self.open_tools.push(id.clone());
+                }
+            }
+            Tail::ToolResult(id) => {
+                if let Some(pos) = self.open_tools.iter().position(|t| t == id) {
+                    self.open_tools.remove(pos);
+                }
+            }
+            Tail::Text | Tail::None => {}
+        }
+        // The last user/assistant line drives the tail-shape derivation.
+        if matches!(ev.kind, Kind::User | Kind::Assistant) {
+            self.last_kind = Some(ev.kind);
+            self.last_tail = ev.tail.clone();
+            self.pending_tool_ts = match &ev.tail {
+                Tail::ToolUse(id) if self.open_tools.iter().any(|t| t == id) => ev.ts_ms,
+                _ => None,
+            };
+        }
+        if let Some(a) = ev.action {
+            self.last_action = a.clone();
+            if self.recent.len() == RECENT_KEEP {
+                self.recent.pop_front();
+            }
+            self.recent.push_back(a);
+        }
+    }
+
+    /// Derive [`Status`] from the accumulated tail state against `now_ms`.
+    ///
+    /// Pure and deterministic: it reads only fields already computed by
+    /// [`apply`](AgentSession::apply) plus the passed-in `now_ms` — it never
+    /// calls the system clock, so the dwell/idle thresholds are testable with
+    /// fixed times. `World::refresh` stamps `now` and calls this.
+    pub fn derive_status(&self, now_ms: u64) -> Status {
+        // Idle wins first: nothing recent enough to claim either way.
+        if let Some(ts) = self.last_ts_ms {
+            if now_ms.saturating_sub(ts) >= IDLE_MS {
+                return Status::Idle;
+            }
+        } else {
+            return Status::Idle; // no timestamped activity at all
+        }
+        match (self.last_kind, &self.last_tail) {
+            // Last line is an unresolved trailing tool_use.
+            (Some(Kind::Assistant), Tail::ToolUse(id))
+                if self.open_tools.iter().any(|t| t == id) =>
+            {
+                if mode_prompts(self.perm_mode.as_deref()) {
+                    let dwelled = self
+                        .pending_tool_ts
+                        .map(|ts| now_ms.saturating_sub(ts) >= APPROVAL_DWELL_MS)
+                        .unwrap_or(false);
+                    if dwelled {
+                        Status::WaitingApproval
+                    } else {
+                        Status::Working // still inside the dwell band
+                    }
+                } else {
+                    Status::Working // auto-approving mode: a running tool
+                }
+            }
+            // Assistant turn ended cleanly on a text block.
+            (Some(Kind::Assistant), Tail::Text) => Status::WaitingPrompt,
+            // Last line is a user prompt or a tool result: the agent is working.
+            (Some(Kind::User), _) => Status::Working,
+            // Any other assistant tail (resolved tool, empty) → working.
+            (Some(Kind::Assistant), _) => Status::Working,
+            // `last_kind` is only ever set to User/Assistant (see `apply`);
+            // Other never lands here, but the match must be total.
+            (Some(Kind::Other), _) => Status::Working,
+            (None, _) => Status::Idle,
+        }
+    }
+
+    fn tail(&mut self) -> std::io::Result<()> {
+        let meta = std::fs::metadata(&self.path)?;
+        self.mtime_ms = to_ms(meta.modified()?);
+        let len = meta.len();
+        if len < self.offset {
+            self.reset(); // truncated or rewritten: start over
+            self.mtime_ms = to_ms(meta.modified()?);
+        }
+        if len == self.offset {
+            return Ok(());
+        }
+        let mut f = std::fs::File::open(&self.path)?;
+        f.seek(SeekFrom::Start(self.offset))?;
+        let mut new = Vec::with_capacity((len - self.offset) as usize);
+        f.read_to_end(&mut new)?;
+        self.offset = len;
+        let mut buf = std::mem::take(&mut self.partial);
+        buf.extend_from_slice(&new);
+        let mut start = 0;
+        while let Some(nl) = buf[start..].iter().position(|&b| b == b'\n') {
+            let line = &buf[start..start + nl];
+            if let Ok(text) = std::str::from_utf8(line) {
+                if let Some(ev) = claude::parse_line(text.trim_end_matches('\r')) {
+                    self.apply(ev);
+                }
+            }
+            start += nl + 1;
+        }
+        self.partial = buf[start..].to_vec();
+        Ok(())
+    }
+
+    fn scan_subagents(&mut self, now_ms: u64) {
+        self.subagents_total = 0;
+        self.subagents_active = 0;
+        let dir = match self.path.parent() {
+            Some(p) => p.join(&self.id).join("subagents"),
+            None => return,
+        };
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.extension().is_some_and(|e| e == "jsonl") {
+                self.subagents_total += 1;
+                if let Ok(meta) = entry.metadata() {
+                    if let Ok(modified) = meta.modified() {
+                        if now_ms.saturating_sub(to_ms(modified)) < SUBAGENT_ACTIVE_MS {
+                            self.subagents_active += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// All sessions under one projects root, sorted most-recent first.
+#[derive(Debug)]
+pub struct World {
+    pub root: PathBuf,
+    pub sessions: Vec<AgentSession>,
+}
+
+impl World {
+    pub fn new(root: PathBuf) -> World {
+        World {
+            root,
+            sessions: Vec::new(),
+        }
+    }
+
+    /// Discover new transcripts, tail changed ones, refresh subagent
+    /// counts, derive each session's status, and re-sort. Missing roots and
+    /// unreadable files are tolerated — a monitor keeps running.
+    pub fn refresh(&mut self) {
+        self.refresh_impl(0);
+    }
+
+    /// Like [`refresh`](World::refresh), but skips *tailing* any transcript
+    /// whose mtime predates `cutoff_ms` — metadata only, no byte reads. amux
+    /// passes its own process start time so a cold first scan never blocks on
+    /// sessions that stopped writing before amux existed (§5 of the design).
+    /// Discovery, subagent counts, status, and sort still run for every
+    /// session; only the (potentially large) tail read is skipped.
+    pub fn refresh_since(&mut self, cutoff_ms: u64) {
+        self.refresh_impl(cutoff_ms);
+    }
+
+    fn refresh_impl(&mut self, cutoff_ms: u64) {
+        let now = now_ms();
+        let Ok(projects) = std::fs::read_dir(&self.root) else {
+            return;
+        };
+        for project in projects.flatten() {
+            let ppath = project.path();
+            if !ppath.is_dir() {
+                continue;
+            }
+            let pname = project.file_name().to_string_lossy().into_owned();
+            let Ok(files) = std::fs::read_dir(&ppath) else {
+                continue;
+            };
+            for file in files.flatten() {
+                let fpath = file.path();
+                if fpath.extension().is_some_and(|e| e == "jsonl")
+                    && !self.sessions.iter().any(|s| s.path == fpath)
+                {
+                    let id = fpath
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    let mut s = AgentSession::new(fpath, id, pname.clone());
+                    s.first_seen_ms = now;
+                    self.sessions.push(s);
+                }
+            }
+        }
+        self.sessions.retain(|s| s.path.exists());
+        for s in &mut self.sessions {
+            if cutoff_ms == 0 {
+                let _ = s.tail();
+            } else {
+                // Metadata-only: learn mtime cheaply; tail only if fresh.
+                match std::fs::metadata(&s.path).and_then(|m| m.modified()) {
+                    Ok(modified) => {
+                        s.mtime_ms = to_ms(modified);
+                        if s.mtime_ms >= cutoff_ms {
+                            let _ = s.tail();
+                        }
+                    }
+                    Err(_) => {
+                        let _ = s.tail();
+                    }
+                }
+            }
+            s.scan_subagents(now);
+            s.status = s.derive_status(now);
+        }
+        self.sessions.sort_by_key(|s| std::cmp::Reverse(s.mtime_ms));
+    }
+}
+
+pub fn now_ms() -> u64 {
+    to_ms(SystemTime::now())
+}
+
+fn to_ms(t: SystemTime) -> u64 {
+    t.duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis().min(u64::MAX as u128) as u64)
+        .unwrap_or(0)
+}
