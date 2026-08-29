@@ -16,8 +16,10 @@ tints the pane border when an agent is waiting on the human.
   loop, does not spawn or control anything, and **never writes**.
 - **Read-only, own disk, documented surfaces only.** It opens `*.jsonl` under
   the configured projects root (`~/.claude/projects`) and its
-  `<session>/subagents/` dirs — nothing else in `~/.claude`, never a credential
-  file, no network.
+  `<session>/subagents/` dirs — the user's own tools' files, nothing else in
+  `~/.claude`, never a credential file, no network. It **never writes**. A
+  consumer that only needs attention (like amux) reads `status` and ignores the
+  message previews (`last_action`/`recent`) — status, not conversation content.
 
 ## Use
 
