@@ -104,6 +104,13 @@ pub struct AgentSession {
 const RECENT_KEEP: usize = 6;
 /// A subagent transcript touched within this window counts as active.
 const SUBAGENT_ACTIVE_MS: u64 = 120_000;
+/// Upper bound on a *single* tail read. A monitor only needs the recent tail
+/// of a transcript to derive status, so when a session is further behind than
+/// this (a huge backlog, or the first read of a large live transcript) we read
+/// only the last `TAIL_CAP` bytes and resync at the next line boundary instead
+/// of `read_to_end`-ing hundreds of MB and blocking the caller's loop. 16 MiB
+/// is thousands of lines — far more tail than any status needs.
+const TAIL_CAP: u64 = 16 * 1024 * 1024;
 
 impl AgentSession {
     fn new(path: PathBuf, id: String, project_dir: String) -> AgentSession {
@@ -260,6 +267,15 @@ impl AgentSession {
         }
     }
 
+    /// Mark the session caught up to `len` without reading any bytes. Used for a
+    /// bounded cold start ([`World::refresh_since`]): a stale transcript is not
+    /// tailed, but recording its length here means a later [`tail`](Self::tail)
+    /// reads only genuinely new bytes rather than re-scanning the whole backlog.
+    fn mark_caught_up(&mut self, len: u64) {
+        self.offset = len;
+        self.partial.clear();
+    }
+
     fn tail(&mut self) -> std::io::Result<()> {
         let meta = std::fs::metadata(&self.path)?;
         self.mtime_ms = to_ms(meta.modified()?);
@@ -272,13 +288,38 @@ impl AgentSession {
             return Ok(());
         }
         let mut f = std::fs::File::open(&self.path)?;
-        f.seek(SeekFrom::Start(self.offset))?;
-        let mut new = Vec::with_capacity((len - self.offset) as usize);
+        // Bound a single tail: when we are further behind than `TAIL_CAP` (a huge
+        // backlog, or the first read of a large live transcript), read only the
+        // last `TAIL_CAP` bytes and resync at the next line — never `read_to_end`
+        // hundreds of MB in one loop tick.
+        let capped = len - self.offset > TAIL_CAP;
+        let seek_to = if capped { len - TAIL_CAP } else { self.offset };
+        f.seek(SeekFrom::Start(seek_to))?;
+        let mut new = Vec::with_capacity((len - seek_to) as usize);
         f.read_to_end(&mut new)?;
         self.offset = len;
-        let mut buf = std::mem::take(&mut self.partial);
-        buf.extend_from_slice(&new);
+        // Assemble the byte buffer and the parse start. When capped, `new` begins
+        // mid-line, so drop the leading fragment (parse after the first newline)
+        // and discard any stale partial; otherwise continue from the saved partial.
         let mut start = 0;
+        let buf = if capped {
+            self.partial.clear();
+            match new.iter().position(|&b| b == b'\n') {
+                Some(nl) => {
+                    start = nl + 1;
+                    new
+                }
+                None => {
+                    // No line boundary in the window — nothing parseable yet.
+                    self.partial = new;
+                    return Ok(());
+                }
+            }
+        } else {
+            let mut buf = std::mem::take(&mut self.partial);
+            buf.extend_from_slice(&new);
+            buf
+        };
         while let Some(nl) = buf[start..].iter().position(|&b| b == b'\n') {
             let line = &buf[start..start + nl];
             if let Ok(text) = std::str::from_utf8(line) {
@@ -385,11 +426,16 @@ impl World {
                 let _ = s.tail();
             } else {
                 // Metadata-only: learn mtime cheaply; tail only if fresh.
-                match std::fs::metadata(&s.path).and_then(|m| m.modified()) {
-                    Ok(modified) => {
-                        s.mtime_ms = to_ms(modified);
+                match std::fs::metadata(&s.path) {
+                    Ok(m) => {
+                        s.mtime_ms = m.modified().map(to_ms).unwrap_or(s.mtime_ms);
                         if s.mtime_ms >= cutoff_ms {
                             let _ = s.tail();
+                        } else if s.offset == 0 {
+                            // Stale and never read: skip the (possibly huge)
+                            // backlog, but mark it caught up so a later refresh()
+                            // tails only new bytes instead of re-reading history.
+                            s.mark_caught_up(m.len());
                         }
                     }
                     Err(_) => {

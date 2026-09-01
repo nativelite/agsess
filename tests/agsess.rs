@@ -336,7 +336,51 @@ fn refresh_since_skips_tailing_stale_files_but_still_discovers() {
     let s = &w.sessions[0];
     assert_eq!(s.assistant_msgs, 0, "stale file must not be tailed");
     assert!(s.mtime_ms > 0, "metadata (mtime) is still learned");
-    // A cutoff of 0 (== refresh) tails it fully.
-    w.refresh_since(0);
-    assert_eq!(w.sessions[0].assistant_msgs, 1);
+    // A stale skip marks the session caught up to the current length, so a later
+    // refresh() does NOT re-read the (possibly huge) backlog — this is the fix
+    // for the fleet-scale hang: the first poll after a cold start must not full-
+    // read every historical transcript.
+    w.refresh();
+    assert_eq!(w.sessions[0].assistant_msgs, 0, "stale backlog is not re-read after catch-up");
+    // But genuinely new bytes appended after catch-up are still tailed.
+    let path = td.path().join("p").join("s1.jsonl");
+    let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+    writeln!(f, "{ASSISTANT_TEXT}").unwrap();
+    drop(f);
+    w.refresh();
+    assert_eq!(w.sessions[0].assistant_msgs, 1, "new activity after catch-up is tailed");
+}
+
+#[test]
+fn tail_caps_a_huge_backlog_and_still_reads_the_recent_tail() {
+    // A transcript far larger than the tail cap must not be read in full: tail
+    // reads only the last window, resyncs past the mid-file cut, and still
+    // aggregates the recent line at the end.
+    let td = TempDir::new("cap");
+    let dir = td.path().join("p");
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("big.jsonl");
+    {
+        let mut f = File::create(&path).unwrap();
+        // Non-JSON filler (ignored by the parser) to pad past the 16 MiB cap,
+        // then a real assistant line at the very end.
+        let filler = format!("{}\n", "x".repeat(8192));
+        let target = 17 * 1024 * 1024u64; // > TAIL_CAP
+        let mut written = 0u64;
+        while written < target {
+            f.write_all(filler.as_bytes()).unwrap();
+            written += filler.len() as u64;
+        }
+        writeln!(f, "{ASSISTANT_TEXT}").unwrap();
+    }
+    let mut w = World::new(td.path().to_path_buf());
+    w.refresh(); // cutoff 0 -> tail(), capped to the last 16 MiB
+    assert_eq!(w.sessions.len(), 1);
+    assert_eq!(
+        w.sessions[0].assistant_msgs, 1,
+        "the recent tail is still aggregated despite the cap"
+    );
+    // Offset advanced to the full length, so a second refresh is a no-op read.
+    w.refresh();
+    assert_eq!(w.sessions[0].assistant_msgs, 1, "no re-read after catch-up");
 }
