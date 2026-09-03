@@ -466,33 +466,28 @@ impl World {
 
     fn refresh_impl(&mut self, cutoff_ms: u64) {
         let now = now_ms();
-        let Ok(projects) = std::fs::read_dir(&self.root) else {
-            return;
-        };
-        for project in projects.flatten() {
-            let ppath = project.path();
-            if !ppath.is_dir() {
+        // Discover transcripts with a *bounded recursive* walk rather than a fixed
+        // depth. Claude Code nests one level (root/<project>/<session>.jsonl), but
+        // other vendors nest deeper (two, three, four levels down), so a hardcoded
+        // depth-2 scan silently missed them. `project_dir` becomes the transcript's
+        // own parent-directory name — the project label for any layout.
+        let ext = self.vendor.transcript_ext();
+        for fpath in scan_transcripts(&self.root, ext, MAX_SCAN_DEPTH) {
+            if self.sessions.iter().any(|s| s.path == fpath) {
                 continue;
             }
-            let pname = project.file_name().to_string_lossy().into_owned();
-            let Ok(files) = std::fs::read_dir(&ppath) else {
-                continue;
-            };
-            for file in files.flatten() {
-                let fpath = file.path();
-                let ext = self.vendor.transcript_ext();
-                if fpath.extension().is_some_and(|e| e == ext)
-                    && !self.sessions.iter().any(|s| s.path == fpath)
-                {
-                    let id = fpath
-                        .file_stem()
-                        .map(|s| s.to_string_lossy().into_owned())
-                        .unwrap_or_default();
-                    let mut s = AgentSession::new(self.vendor, fpath, id, pname.clone());
-                    s.first_seen_ms = now;
-                    self.sessions.push(s);
-                }
-            }
+            let id = fpath
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let pname = fpath
+                .parent()
+                .and_then(|p| p.file_name())
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let mut s = AgentSession::new(self.vendor, fpath, id, pname);
+            s.first_seen_ms = now;
+            self.sessions.push(s);
         }
         self.sessions.retain(|s| s.path.exists());
         for s in &mut self.sessions {
@@ -524,6 +519,40 @@ impl World {
     }
 }
 
+/// Directory-depth bound for [`scan_transcripts`]: how far below a world's root
+/// the discovery walk descends. Claude nests one level; other vendors up to a few,
+/// so 6 finds every known layout without risking a runaway walk of an unrelated
+/// deep tree.
+const MAX_SCAN_DEPTH: usize = 6;
+
+/// Collect transcript files matching `ext` under `root`, descending at most
+/// `max_depth` directory levels (iterative — no recursion-depth risk).
+/// Best-effort: unreadable directories are skipped. A `subagents/` directory is
+/// NOT descended into: a claude session keeps its sub-agent transcripts there and
+/// they are counted separately ([`AgentSession::scan_subagents`]), never as
+/// top-level sessions.
+fn scan_transcripts(root: &std::path::Path, ext: &str, max_depth: usize) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let mut stack: Vec<(PathBuf, usize)> = vec![(root.to_path_buf(), 0)];
+    while let Some((dir, depth)) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                let is_subagents = p.file_name().is_some_and(|n| n == "subagents");
+                if depth < max_depth && !is_subagents {
+                    stack.push((p, depth + 1));
+                }
+            } else if p.extension().is_some_and(|e| e == ext) {
+                found.push(p);
+            }
+        }
+    }
+    found
+}
+
 pub fn now_ms() -> u64 {
     to_ms(SystemTime::now())
 }
@@ -532,4 +561,34 @@ fn to_ms(t: SystemTime) -> u64 {
     t.duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis().min(u64::MAX as u128) as u64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod scan_tests {
+    use super::{scan_transcripts, MAX_SCAN_DEPTH};
+
+    #[test]
+    fn finds_transcripts_at_varying_depths_and_skips_subagents() {
+        // A throwaway tree: a claude-style depth-2 transcript with a subagents
+        // sibling dir, plus a deeper (depth-4) vendor transcript.
+        let base = std::env::temp_dir().join(format!("agsess_scan_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("proj/sessA/subagents")).unwrap();
+        std::fs::write(base.join("proj/sessA.jsonl"), b"{}").unwrap();
+        std::fs::write(base.join("proj/sessA/subagents/sub.jsonl"), b"{}").unwrap();
+        std::fs::create_dir_all(base.join("a/b/c")).unwrap();
+        std::fs::write(base.join("a/b/c/deep.jsonl"), b"{}").unwrap();
+
+        let names: Vec<String> = scan_transcripts(&base, "jsonl", MAX_SCAN_DEPTH)
+            .iter()
+            .filter_map(|p| p.file_name())
+            .map(|n| n.to_string_lossy().into_owned())
+            .collect();
+
+        assert!(names.contains(&"sessA.jsonl".to_string()), "depth-2: {names:?}");
+        assert!(names.contains(&"deep.jsonl".to_string()), "depth-4: {names:?}");
+        assert!(!names.contains(&"sub.jsonl".to_string()), "subagents excluded: {names:?}");
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
 }
