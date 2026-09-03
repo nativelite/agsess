@@ -26,6 +26,58 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Vendor {
     ClaudeCode,
+    Gemini,
+    Codex,
+    Aider,
+    CursorAgent,
+    Copilot,
+    Qwen,
+    OpenCode,
+    Goose,
+}
+
+impl Vendor {
+    /// Dispatch one transcript line to the vendor's format adapter. This is the
+    /// integration seam: every vendor's `parse_line` returns the shared
+    /// [`claude::LineEvent`], so the tailing and status machinery stay
+    /// vendor-blind. Adding a variant fails to compile here until it is wired —
+    /// by design (§6): the enum forces the dispatch to stay total.
+    pub fn parse_line(self, line: &str) -> Option<claude::LineEvent> {
+        match self {
+            Vendor::ClaudeCode => claude::parse_line(line),
+            Vendor::Gemini => crate::gemini::parse_line(line),
+            Vendor::Codex => crate::codex::parse_line(line),
+            Vendor::Aider => crate::aider::parse_line(line),
+            Vendor::CursorAgent => crate::cursor_agent::parse_line(line),
+            Vendor::Copilot => crate::copilot::parse_line(line),
+            Vendor::Qwen => crate::qwen::parse_line(line),
+            Vendor::OpenCode => crate::opencode::parse_line(line),
+            Vendor::Goose => crate::goose::parse_line(line),
+        }
+    }
+
+    /// The transcript file extension the generic discovery scan matches for this
+    /// vendor. Most vendors write JSONL; aider writes a markdown chat log.
+    ///
+    /// NOTE: opencode and cursor-agent (main sessions) persist to SQLite, not a
+    /// tailable text file, so the file scan never finds them and their discovery
+    /// is deferred (see VENDORS.md). Their `parse_line` is still wired above and
+    /// unit-tested against synthetic lines.
+    fn transcript_ext(self) -> &'static str {
+        match self {
+            Vendor::Aider => "md",
+            _ => "jsonl",
+        }
+    }
+
+    /// Whether this vendor stamps every transcript turn with a timestamp. The
+    /// JSONL vendors and Claude Code do; aider's markdown log carries only a
+    /// session-start time, so its activity clock must fall back to the file's
+    /// mtime (see [`AgentSession::derive_status`]) or every aider session traps
+    /// in `Idle` after `IDLE_MS`.
+    fn has_line_timestamps(self) -> bool {
+        !matches!(self, Vendor::Aider)
+    }
 }
 
 /// The attention status derived from a session's transcript tail. This is the
@@ -113,9 +165,9 @@ const SUBAGENT_ACTIVE_MS: u64 = 120_000;
 const TAIL_CAP: u64 = 16 * 1024 * 1024;
 
 impl AgentSession {
-    fn new(path: PathBuf, id: String, project_dir: String) -> AgentSession {
+    fn new(vendor: Vendor, path: PathBuf, id: String, project_dir: String) -> AgentSession {
         AgentSession {
-            vendor: Vendor::ClaudeCode,
+            vendor,
             path,
             id,
             project_dir,
@@ -160,7 +212,7 @@ impl AgentSession {
     fn reset(&mut self) {
         let (path, id, dir) = (self.path.clone(), self.id.clone(), self.project_dir.clone());
         let first_seen = self.first_seen_ms;
-        *self = AgentSession::new(path, id, dir);
+        *self = AgentSession::new(self.vendor, path, id, dir);
         self.first_seen_ms = first_seen; // a rewrite is still the same observed file
     }
 
@@ -227,8 +279,17 @@ impl AgentSession {
     /// calls the system clock, so the dwell/idle thresholds are testable with
     /// fixed times. `World::refresh` stamps `now` and calls this.
     pub fn derive_status(&self, now_ms: u64) -> Status {
-        // Idle wins first: nothing recent enough to claim either way.
-        if let Some(ts) = self.last_ts_ms {
+        // Idle wins first: nothing recent enough to claim either way. The
+        // activity clock is normally the last transcript timestamp — but for a
+        // vendor that doesn't stamp every turn (aider's markdown log carries
+        // only a session-start time) that clock freezes and would trap the
+        // session in Idle, so we fall back to the file's mtime.
+        let activity_ms = if self.vendor.has_line_timestamps() {
+            self.last_ts_ms
+        } else {
+            Some(self.mtime_ms)
+        };
+        if let Some(ts) = activity_ms {
             if now_ms.saturating_sub(ts) >= IDLE_MS {
                 return Status::Idle;
             }
@@ -323,7 +384,7 @@ impl AgentSession {
         while let Some(nl) = buf[start..].iter().position(|&b| b == b'\n') {
             let line = &buf[start..start + nl];
             if let Ok(text) = std::str::from_utf8(line) {
-                if let Some(ev) = claude::parse_line(text.trim_end_matches('\r')) {
+                if let Some(ev) = self.vendor.parse_line(text.trim_end_matches('\r')) {
                     self.apply(ev);
                 }
             }
@@ -363,13 +424,25 @@ impl AgentSession {
 #[derive(Debug)]
 pub struct World {
     pub root: PathBuf,
+    /// The vendor whose transcripts live under `root`. Every session discovered
+    /// here is tagged with it and parsed through its adapter.
+    pub vendor: Vendor,
     pub sessions: Vec<AgentSession>,
 }
 
 impl World {
+    /// A world over a Claude Code projects root — the default vendor. Other
+    /// vendors use [`World::for_vendor`] with their own transcript root.
     pub fn new(root: PathBuf) -> World {
+        World::for_vendor(root, Vendor::ClaudeCode)
+    }
+
+    /// A world over `root` whose transcripts were written by `vendor`. amux
+    /// holds one world per vendor root and merges their sessions for display.
+    pub fn for_vendor(root: PathBuf, vendor: Vendor) -> World {
         World {
             root,
+            vendor,
             sessions: Vec::new(),
         }
     }
@@ -407,14 +480,15 @@ impl World {
             };
             for file in files.flatten() {
                 let fpath = file.path();
-                if fpath.extension().is_some_and(|e| e == "jsonl")
+                let ext = self.vendor.transcript_ext();
+                if fpath.extension().is_some_and(|e| e == ext)
                     && !self.sessions.iter().any(|s| s.path == fpath)
                 {
                     let id = fpath
                         .file_stem()
                         .map(|s| s.to_string_lossy().into_owned())
                         .unwrap_or_default();
-                    let mut s = AgentSession::new(fpath, id, pname.clone());
+                    let mut s = AgentSession::new(self.vendor, fpath, id, pname.clone());
                     s.first_seen_ms = now;
                     self.sessions.push(s);
                 }

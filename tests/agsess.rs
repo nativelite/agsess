@@ -384,3 +384,73 @@ fn tail_caps_a_huge_backlog_and_still_reads_the_recent_tail() {
     w.refresh();
     assert_eq!(w.sessions[0].assistant_msgs, 1, "no re-read after catch-up");
 }
+
+// --- multi-vendor dispatch (the lead-wired integration seam) ---------------
+//
+// These exercise the enum/dispatch wiring end-to-end through `World`, not just
+// each vendor's `parse_line` in isolation: a vendor transcript is discovered,
+// tailed, dispatched to the *right* adapter, and its status derived.
+
+/// gemini-cli lines, in the format `src/gemini.rs` targets. Routed through the
+/// Claude adapter these parse as noise (Kind::Other), so the counts below prove
+/// the dispatch — not a hardcoded default — is what makes them legible.
+const GEMINI_USER: &str =
+    r#"{"role":"user","parts":[{"text":"hello gemini"}],"timestamp":"2024-01-15T10:00:00.000Z"}"#;
+const GEMINI_MODEL_TEXT: &str = r#"{"role":"model","parts":[{"text":"Hi!"}],"timestamp":"2024-01-15T10:00:01.000Z","model":"gemini-2.5-pro","usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":20}}"#;
+
+#[test]
+fn world_for_vendor_dispatches_to_the_matching_parser() {
+    let td = TempDir::new("gemini");
+    write_session(td.path(), "proj", "g1", &[GEMINI_USER, GEMINI_MODEL_TEXT]);
+
+    // Same bytes under the default (Claude) vendor are unreadable — this is the
+    // control that proves dispatch, not discovery, does the work.
+    let mut claude_world = World::new(td.path().to_path_buf());
+    claude_world.refresh();
+    let cs = &claude_world.sessions[0];
+    assert_eq!(
+        (cs.user_msgs, cs.assistant_msgs),
+        (0, 0),
+        "gemini lines are not Claude lines"
+    );
+
+    let mut w = World::for_vendor(td.path().to_path_buf(), Vendor::Gemini);
+    w.refresh();
+    assert_eq!(w.sessions.len(), 1);
+    let s = &w.sessions[0];
+    assert_eq!(s.vendor, Vendor::Gemini);
+    assert_eq!((s.user_msgs, s.assistant_msgs), (1, 1));
+    assert_eq!(s.model.as_deref(), Some("gemini-2.5-pro"));
+    // A model turn ending on text, read fresh, is a prompt-wait.
+    let now = s.last_ts_ms.unwrap() + 1_000;
+    assert_eq!(s.derive_status(now), Status::WaitingPrompt);
+}
+
+/// Aider writes a markdown chat log (`.md`), and its turns carry no per-line
+/// timestamp — so `last_ts_ms` stays `None`. This covers both the `.md`
+/// discovery and the idle-trap fix: `derive_status` must fall back to the
+/// file's mtime instead of pinning every aider session at `Idle`.
+#[test]
+fn aider_md_is_discovered_and_escapes_the_idle_trap() {
+    let td = TempDir::new("aider");
+    let dir = td.path().join("proj");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("s1.md"),
+        "> Tell me what this function does.\n\nIt reverses the string in place.\n",
+    )
+    .unwrap();
+
+    let mut w = World::for_vendor(td.path().to_path_buf(), Vendor::Aider);
+    w.refresh();
+    assert_eq!(w.sessions.len(), 1, ".md transcript discovered");
+    let s = &w.sessions[0];
+    assert_eq!(s.vendor, Vendor::Aider);
+    assert!(s.user_msgs >= 1, "aider parser dispatched, not Claude's");
+    assert_eq!(s.last_ts_ms, None, "aider carries no per-line timestamps");
+    // The file was just written, so despite the absent timestamps it is fresh:
+    // the mtime fallback keeps it out of Idle and lets the text tail surface.
+    let now = agsess::sessions::now_ms();
+    assert_ne!(s.derive_status(now), Status::Idle, "mtime fallback, not the idle trap");
+    assert_eq!(s.derive_status(now), Status::WaitingPrompt);
+}

@@ -20,7 +20,15 @@
 //! incremental tailing, and the [`Status`] derivation. Zero third-party
 //! dependencies — depends only on the org crate `json`.
 
+pub mod aider;
 pub mod claude;
+pub mod codex;
+pub mod copilot;
+pub mod cursor_agent;
+pub mod gemini;
+pub mod goose;
+pub mod opencode;
+pub mod qwen;
 pub mod sessions;
 
 pub use sessions::{AgentSession, Status, Vendor, World, APPROVAL_DWELL_MS, IDLE_MS};
