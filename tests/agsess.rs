@@ -1,5 +1,5 @@
 //! Integration tests for agsess: the vendor-format adapter (fixtures shaped
-//! from real recorded transcript lines, sanitized — no real conversation text),
+//! from real recorded transcript lines, sanitized, no real conversation text),
 //! timestamp parsing vectors, incremental tailing against real temp files
 //! (including a line split across two appends and a truncation reset), and the
 //! attention-status derivation exercised against synthetic fixtures with fixed
@@ -236,7 +236,7 @@ fn subagents_are_counted() {
 // into a temp projects root, tail it through `World::refresh` (so the tail
 // state is built exactly as production builds it), then call the *pure*
 // `derive_status(now_ms)` with fixed times to exercise the dwell/idle
-// thresholds deterministically — no system clock in the assertion path.
+// thresholds deterministically; no system clock in the assertion path.
 
 /// Load a repo fixture into a fresh temp root and return the tailed session,
 /// wrapped so the temp dir outlives the borrow.
@@ -329,7 +329,7 @@ fn refresh_since_skips_tailing_stale_files_but_still_discovers() {
     let td = TempDir::new("since");
     write_session(td.path(), "p", "s1", &[USER_PROMPT, ASSISTANT_TEXT]);
     let mut w = World::new(td.path().to_path_buf());
-    // Cutoff in the far future: every file predates it, so none are tailed —
+    // Cutoff in the far future: every file predates it, so none are tailed,
     // the session is discovered (metadata only) but not aggregated.
     w.refresh_since(u64::MAX);
     assert_eq!(w.sessions.len(), 1);
@@ -337,7 +337,7 @@ fn refresh_since_skips_tailing_stale_files_but_still_discovers() {
     assert_eq!(s.assistant_msgs, 0, "stale file must not be tailed");
     assert!(s.mtime_ms > 0, "metadata (mtime) is still learned");
     // A stale skip marks the session caught up to the current length, so a later
-    // refresh() does NOT re-read the (possibly huge) backlog — this is the fix
+    // refresh() does NOT re-read the (possibly huge) backlog; this is the fix
     // for the fleet-scale hang: the first poll after a cold start must not full-
     // read every historical transcript.
     w.refresh();
@@ -393,7 +393,7 @@ fn tail_caps_a_huge_backlog_and_still_reads_the_recent_tail() {
 
 /// gemini-cli lines, in the format `src/gemini.rs` targets. Routed through the
 /// Claude adapter these parse as noise (Kind::Other), so the counts below prove
-/// the dispatch — not a hardcoded default — is what makes them legible.
+/// the dispatch, not a hardcoded default, is what makes them legible.
 const GEMINI_USER: &str =
     r#"{"role":"user","parts":[{"text":"hello gemini"}],"timestamp":"2024-01-15T10:00:00.000Z"}"#;
 const GEMINI_MODEL_TEXT: &str = r#"{"role":"model","parts":[{"text":"Hi!"}],"timestamp":"2024-01-15T10:00:01.000Z","model":"gemini-2.5-pro","usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":20}}"#;
@@ -403,7 +403,7 @@ fn world_for_vendor_dispatches_to_the_matching_parser() {
     let td = TempDir::new("gemini");
     write_session(td.path(), "proj", "g1", &[GEMINI_USER, GEMINI_MODEL_TEXT]);
 
-    // Same bytes under the default (Claude) vendor are unreadable — this is the
+    // Same bytes under the default (Claude) vendor are unreadable; this is the
     // control that proves dispatch, not discovery, does the work.
     let mut claude_world = World::new(td.path().to_path_buf());
     claude_world.refresh();
@@ -427,7 +427,7 @@ fn world_for_vendor_dispatches_to_the_matching_parser() {
 }
 
 /// Aider writes a markdown chat log (`.md`), and its turns carry no per-line
-/// timestamp — so `last_ts_ms` stays `None`. This covers both the `.md`
+/// timestamp, so `last_ts_ms` stays `None`. This covers both the `.md`
 /// discovery and the idle-trap fix: `derive_status` must fall back to the
 /// file's mtime instead of pinning every aider session at `Idle`.
 #[test]
