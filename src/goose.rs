@@ -4,7 +4,7 @@
 //!   Linux/macOS:  `~/.local/share/goose/sessions/<session>.jsonl`
 //!   Windows:      `%APPDATA%\goose\sessions\<session>.jsonl`
 //!
-//! Each line is a single JSON message — no outer wrapper, unlike Claude Code's
+//! Each line is a single JSON message, no outer wrapper, unlike Claude Code's
 //! envelope. The target format follows the Anthropic messages schema that Goose
 //! is built on:
 //! ```text

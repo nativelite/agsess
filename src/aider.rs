@@ -2,14 +2,14 @@
 //! (`<project-cwd>/.aider.chat.history.md`).
 //!
 //! Unlike Claude Code, aider writes **markdown**, not JSONL. A turn is not a
-//! self-contained JSON line — it spans multiple lines: user turns are every
+//! self-contained JSON line; it spans multiple lines: user turns are every
 //! consecutive `> `-prefixed line; assistant turns are the bare-text blocks
 //! that follow. `parse_line` classifies each line *individually* by its
 //! syntactic role. The sessions machinery takes the last meaningful
 //! classification as the tail state, which is sufficient for attention-status
 //! derivation.
 //!
-//! # NOTE — RESEARCHED STUB
+//! # NOTE: RESEARCHED STUB
 //!
 //! Format derived from the public `aider-chat/aider` repository (stable since
 //! ~v0.40) and the official documentation. **Not verified against a live
@@ -34,7 +34,7 @@
 //! # Transcript location
 //!
 //! Default: `<cwd>/.aider.chat.history.md` (the working directory where aider
-//! was launched). Configurable via `--chat-history-file`. No central store —
+//! was launched). Configurable via `--chat-history-file`. No central store:
 //! each project has its own file.
 //!
 //! # Line format (targeted)
@@ -70,7 +70,7 @@ use crate::claude::{Kind, LineEvent, Tail};
 /// bare `>` prompts, code-fence markers, etc.).
 pub fn parse_line(line: &str) -> Option<LineEvent> {
     let line = line.trim_end_matches('\r');
-    // Skip empty lines — they are separators in the markdown format.
+    // Skip empty lines: they are separators in the markdown format.
     if line.trim().is_empty() {
         return None;
     }
@@ -93,7 +93,7 @@ pub fn parse_line(line: &str) -> Option<LineEvent> {
         });
     }
 
-    // "#### aider (model-name)" — assistant-turn header, optionally with model.
+    // "#### aider (model-name)": assistant-turn header, optionally with model.
     // Seen in some aider versions that write structured section headers.
     if let Some(rest) = line.strip_prefix("#### aider") {
         let model = extract_model(rest);
@@ -111,7 +111,7 @@ pub fn parse_line(line: &str) -> Option<LineEvent> {
         });
     }
 
-    // Other markdown headers (# …, #### user, ---) — structural noise.
+    // Other markdown headers (# …, #### user, ---) are structural noise.
     if line.starts_with('#') || line.starts_with("####") || line == "---" {
         return Some(LineEvent {
             kind: Kind::Other,
@@ -128,7 +128,7 @@ pub fn parse_line(line: &str) -> Option<LineEvent> {
     }
 
     // User turn: lines beginning with "> " (commands and messages alike).
-    // A bare ">" with nothing after it is an empty prompt — skip it.
+    // A bare ">" with nothing after it is an empty prompt: skip it.
     if let Some(msg) = line.strip_prefix("> ") {
         let msg = msg.trim();
         if msg.is_empty() {
@@ -245,7 +245,7 @@ fn preview(text: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Tests — synthetic transcript lines in the targeted format
+// Tests: synthetic transcript lines in the targeted format
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]

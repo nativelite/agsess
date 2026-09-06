@@ -18,14 +18,14 @@
 //! | `model`     | model identifier (not always present)          | researched |
 //! | tool blocks | `tool_use` / `tool_result` Anthropic-style     | unverified |
 //!
-//! ## NOTE — tool-call block shape is unverified
+//! ## NOTE: tool-call block shape is unverified
 //!
 //! Qwen Code supports multiple backends (Anthropic, OpenAI, Gemini, Qwen,
 //! Ollama). The tool-call block shape in the JSONL may differ by backend. This
 //! parser targets the Anthropic-style convention (`type: "tool_use"` with `id`
 //! and `name`; `type: "tool_result"` with `tool_use_id`) because Qwen Code's
 //! content-block handling is closest to the Anthropic SDK. This has **not been
-//! validated against a captured real transcript** — update `parse_line` and the
+//! validated against a captured real transcript**; update `parse_line` and the
 //! tests if a real transcript reveals a different shape.
 
 use crate::claude::{Kind, LineEvent, Tail};
@@ -33,7 +33,7 @@ use json::Value;
 
 /// Parse one Qwen Code transcript line. Returns `None` for non-JSON or empty
 /// lines. Unknown roles and malformed content degrade to `Kind::Other` /
-/// `Tail::None` — the monitor never crashes on unexpected input.
+/// `Tail::None`: the monitor never crashes on unexpected input.
 pub fn parse_line(line: &str) -> Option<LineEvent> {
     let v = json::parse(line).ok()?;
 
@@ -215,7 +215,7 @@ mod tests {
 
     #[test]
     fn user_text_block_array() {
-        // Array content with a text block — no tool involvement.
+        // Array content with a text block, no tool involvement.
         let line = r#"{"role":"user","content":[{"type":"text","text":"hello"}]}"#;
         let ev = parse_line(line).unwrap();
         assert_eq!(ev.kind, Kind::User);
@@ -298,7 +298,7 @@ mod tests {
 
     #[test]
     fn timestamp_parsed_to_epoch_ms() {
-        // 2025-01-15T10:30:00.500Z — verify it lands after Nov 2023 epoch baseline.
+        // 2025-01-15T10:30:00.500Z: verify it lands after Nov 2023 epoch baseline.
         let line = r#"{"role":"user","content":"hi","timestamp":"2025-01-15T10:30:00.500Z"}"#;
         let ev = parse_line(line).unwrap();
         assert!(ev.ts_ms.unwrap() > 1_700_000_000_000);

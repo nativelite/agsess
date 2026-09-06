@@ -9,21 +9,21 @@
 //!
 //! The `type` discriminants that drive status derivation:
 //!
-//! - `session_meta` — first line; `payload.cwd` (working dir) and `payload.git.branch`.
-//! - `turn_context` — one per user turn; `payload.model`, `payload.cwd`, and
+//! - `session_meta`: first line; `payload.cwd` (working dir) and `payload.git.branch`.
+//! - `turn_context`: one per user turn; `payload.model`, `payload.cwd`, and
 //!   `payload.approval_policy` (→ `permission_mode`).
-//! - `response_item` — an OpenAI Responses API item; inner `payload.type`:
+//! - `response_item`: an OpenAI Responses API item; inner `payload.type`:
 //!   - `function_call`        → `Kind::Assistant`, `Tail::ToolUse(call_id)`
 //!   - `function_call_output` → `Kind::User`,      `Tail::ToolResult(call_id)`
 //!   - `local_shell_call`     → `Kind::Assistant`, `Tail::ToolUse(call_id)`
 //!   - `message` role=assistant → `Kind::Assistant`, `Tail::Text`
 //!   - `message` role=user/developer → `Kind::User`, `Tail::None`
 //!   - `reasoning`            → `Kind::Assistant`, `Tail::None` (thinking block)
-//! - `event_msg` — legacy protocol events; inner `payload.type`:
+//! - `event_msg`: legacy protocol events; inner `payload.type`:
 //!   - `user_message`  → `Kind::User`, `Tail::None`
 //!   - `agent_message` → `Kind::Assistant`, `Tail::Text`
 //!   - `token_count`   → tokens only (`Kind::Other`)
-//! - `token_usage_record` — per-turn token totals; tokens only (`Kind::Other`).
+//! - `token_usage_record`: per-turn token totals; tokens only (`Kind::Other`).
 //!
 //! ## Approval policy → permission_mode
 //!
@@ -38,7 +38,7 @@
 //! `$CODEX_HOME` (default `~/.codex`) → `sessions/YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl`.
 //! Archived sessions live under `archived_sessions/` in the same root.
 //!
-//! // NOTE: **unverified** — the line format was derived from the openai/codex
+//! // NOTE: **unverified**: the line format was derived from the openai/codex
 //! //   repository source (`codex-rs/protocol/src/models.rs`,
 //! //   `codex-rs/history/src/rollout_payload.rs`,
 //! //   `codex-rs/protocol/src/protocol.rs`) and from published third-party
@@ -51,7 +51,7 @@ use json::Value;
 
 /// Parse one Codex rollout JSONL line into a [`LineEvent`].
 /// Returns `None` for non-JSON input or line types that contribute nothing
-/// observable — the same contract as [`crate::claude::parse_line`].
+/// observable: the same contract as [`crate::claude::parse_line`].
 pub fn parse_line(line: &str) -> Option<LineEvent> {
     let v = json::parse(line).ok()?;
     let ts_ms = v.get("timestamp").and_then(Value::as_str).and_then(parse_ts);
@@ -300,7 +300,7 @@ fn parse_event_msg(p: &Value, ts_ms: Option<u64>) -> Option<LineEvent> {
             })
         }
 
-        // task_started/turn_started — agent is beginning work.
+        // task_started/turn_started: agent is beginning work.
         Some("task_started") | Some("turn_started") => Some(LineEvent {
             kind: Kind::Other,
             ts_ms,
@@ -465,7 +465,7 @@ mod tests {
 
     #[test]
     fn turn_context_granular_object_is_default() {
-        // A granular approval_policy is an object — treat as prompting.
+        // A granular approval_policy is an object: treat as prompting.
         let line = r#"{"timestamp":"2025-05-07T17:24:22.000Z","ordinal":2,"type":"turn_context","payload":{"model":"gpt-4o","cwd":"/home/user","approval_policy":{"type":"granular","allow_apply_patch":true},"sandbox_policy":"workspace-write"}}"#;
         let ev = parse(line);
         assert_eq!(ev.permission_mode.as_deref(), Some("default"));
@@ -544,7 +544,7 @@ mod tests {
 
     #[test]
     fn response_item_local_shell_call_falls_back_to_id() {
-        // call_id absent, id present — use id as the tool use id
+        // call_id absent, id present: use id as the tool use id
         let line = r#"{"timestamp":"2025-05-07T17:24:24.000Z","ordinal":4,"type":"response_item","payload":{"type":"local_shell_call","id":"lsc_legacy","status":"completed","action":{"type":"run","command":"ls"}}}"#;
         let ev = parse(line);
         assert_eq!(ev.tail, Tail::ToolUse("lsc_legacy".to_string()));

@@ -1,4 +1,4 @@
-//! agsess — local agent session state, from the files the user's own agent
+//! agsess: local agent session state, from the files the user's own agent
 //! CLIs write to their own disk.
 //!
 //! A session root (a directory path) in → a snapshot of [`AgentSession`]s out,
@@ -18,7 +18,7 @@
 //! The two modules are the seam: [`claude`] is the (unstable, vendor-specific)
 //! format adapter, isolated behind fixtures; [`sessions`] is discovery,
 //! incremental tailing, and the [`Status`] derivation. Zero third-party
-//! dependencies — depends only on the org crate `json`.
+//! dependencies: depends only on the org crate `json`.
 
 pub mod aider;
 pub mod claude;

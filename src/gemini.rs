@@ -3,13 +3,13 @@
 //! **Transcript location:** `~/.gemini/tmp/<session-id>/<session>.jsonl`
 //! (one JSON object per line, appended as the conversation progresses).
 //!
-//! **Format target** — Gemini CLI (`@google/gemini-cli`) records turns in the
+//! **Format target**: Gemini CLI (`@google/gemini-cli`) records turns in the
 //! Gemini API wire format: each line is a JSON object with a `role` field
 //! (`"user"` | `"model"`) and a `parts` array. Tool calls appear as
 //! `functionCall` parts; tool results as `functionResponse` parts. Optional
 //! top-level fields include `timestamp`, `model`, and `usageMetadata`.
 //!
-//! Example lines (synthetic — field names verified against the Gemini API
+//! Example lines (synthetic; field names verified against the Gemini API
 //! reference; the exact JSONL layout is derived from the open-source
 //! `google-gemini/gemini-cli` TypeScript source):
 //!
@@ -17,10 +17,10 @@
 //! {"role":"user","parts":[{"text":"ls the project"}],"timestamp":"2024-01-15T10:00:00.000Z"}
 //! {"role":"model","parts":[{"functionCall":{"name":"bash","args":{"cmd":"ls"},"id":"fc_1"}}],"timestamp":"2024-01-15T10:00:01.000Z","model":"gemini-2.5-pro","usageMetadata":{"promptTokenCount":12,"candidatesTokenCount":8}}
 //! {"role":"user","parts":[{"functionResponse":{"name":"bash","id":"fc_1","response":{"output":"src/"}}}],"timestamp":"2024-01-15T10:00:02.000Z"}
-//! {"role":"model","parts":[{"text":"Done — only one source dir."}],"timestamp":"2024-01-15T10:00:03.000Z"}
+//! {"role":"model","parts":[{"text":"Done: only one source dir."}],"timestamp":"2024-01-15T10:00:03.000Z"}
 //! ```
 //!
-//! // NOTE: This parser is a **researched stub** — the field layout was derived
+//! // NOTE: This parser is a **researched stub**: the field layout was derived
 //! // from the Gemini API specification and the open-source gemini-cli TypeScript
 //! // source, but has NOT been verified against a real on-disk transcript.
 //! // A real run may differ in field names (e.g. `timestamp` key, `id` presence
@@ -84,7 +84,7 @@ pub fn parse_line(line: &str) -> Option<LineEvent> {
     })
 }
 
-/// "Last relevant part wins" — a `functionCall` reads as `tool: Name`,
+/// "Last relevant part wins": a `functionCall` reads as `tool: Name`,
 /// otherwise a text preview. Mirrors `claude::assistant_action`.
 fn model_action(parts: &[Value]) -> Option<String> {
     for part in parts.iter().rev() {
@@ -119,7 +119,7 @@ fn user_action(parts: &[Value]) -> Option<String> {
 ///
 /// - `functionCall` → `Tail::ToolUse(id)`, falling back to the function name
 ///   when `id` is absent (Gemini API v1 omits it).
-/// - `text` → `Tail::Text` (model turn ended cleanly — agent wants user input).
+/// - `text` → `Tail::Text` (model turn ended cleanly; agent wants user input).
 /// - anything else → `Tail::None`
 fn model_tail_of(parts: &[Value]) -> Tail {
     for part in parts.iter().rev() {
@@ -222,7 +222,7 @@ mod tests {
 
     #[test]
     fn user_text_preview_truncated() {
-        // 60-char string — preview should truncate at 46 chars + ellipsis
+        // 60-char string: preview should truncate at 46 chars + ellipsis
         let long = "a".repeat(60);
         let line = format!(r#"{{"role":"user","parts":[{{"text":"{long}"}}]}}"#);
         let ev = parse(&line);
@@ -322,7 +322,7 @@ mod tests {
     fn cwd_branch_permission_mode_always_none() {
         let line = r#"{"role":"user","parts":[{"text":"test"}],"cwd":"/some/path","gitBranch":"main","permissionMode":"default"}"#;
         let ev = parse(line);
-        // Gemini CLI doesn't emit these — we ignore them even if present
+        // Gemini CLI doesn't emit these; we ignore them even if present
         assert!(ev.cwd.is_none());
         assert!(ev.branch.is_none());
         assert!(ev.permission_mode.is_none());

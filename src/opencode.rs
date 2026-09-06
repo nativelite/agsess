@@ -57,14 +57,14 @@
 //! Content blocks in the `content` array are assumed to follow the standard
 //! Anthropic multi-block convention (`type`/`id`/`tool_use_id`) because
 //! OpenCode normalises its internal representation to that shape across
-//! providers — but this too is unverified from a real transcript.
+//! providers, but this too is unverified from a real transcript.
 
 use json::Value;
 
 // Re-export the shared types so callers only import this module.
 pub use crate::claude::{Kind, LineEvent, Tail};
 
-/// Parse one OpenCode JSONL export line. Returns `None` for non-JSON lines —
+/// Parse one OpenCode JSONL export line. Returns `None` for non-JSON lines;
 /// a monitor treats those as noise, not an error.
 pub fn parse_line(line: &str) -> Option<LineEvent> {
     let v = json::parse(line).ok()?;

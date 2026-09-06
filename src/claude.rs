@@ -5,13 +5,13 @@
 //! territory, so everything agsess needs from a line is squeezed into
 //! [`LineEvent`] here, anchored to recorded fixtures in the tests. Unknown
 //! line types and malformed lines degrade to `Other`/`None`, never to a
-//! crash — a monitor must survive whatever the transcript throws at it.
+//! crash: a monitor must survive whatever the transcript throws at it.
 //!
 //! Ported verbatim from agtop's `claude.rs`, then *extended* (additive only)
 //! with the fields the status derivation needs: the per-line `permission_mode`
 //! (from dedicated `permission-mode` records and from the top-level
 //! `permissionMode` on `user` records), and the shape of the last content
-//! block ([`Tail`]) — a `tool_use` with its `id`, a `tool_result` with its
+//! block ([`Tail`]): a `tool_use` with its `id`, a `tool_result` with its
 //! `tool_use_id`, or a trailing `text`. agtop's aggregate never reads these,
 //! so its rendering is unaffected; only [`crate::sessions`]'s `Status`
 //! derivation consumes them.
@@ -30,7 +30,7 @@ pub enum Kind {
 /// A line may end in a tool call (`ToolUse`, carrying the call id so a later
 /// `tool_result` can resolve it), a tool result (`ToolResult`, carrying the
 /// id it resolves), a trailing assistant `Text` block, or nothing relevant
-/// (`None` — e.g. a bare user prompt string, or a non user/assistant record).
+/// (`None`, e.g. a bare user prompt string, or a non user/assistant record).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum Tail {
     /// Last block is a `tool_use`; the `String` is its `id`.
@@ -59,13 +59,13 @@ pub struct LineEvent {
     /// The session's permission mode as recorded on this line, if any.
     /// Set by dedicated `permission-mode` records and by the top-level
     /// `permissionMode` on `user` records. `None` on lines that don't carry
-    /// it — the aggregate keeps the last non-`None` value it saw.
+    /// it; the aggregate keeps the last non-`None` value it saw.
     pub permission_mode: Option<String>,
     /// The shape of this line's final content block (for `Status`).
     pub tail: Tail,
 }
 
-/// Parse one transcript line. `None` means the line is not JSON — a monitor
+/// Parse one transcript line. `None` means the line is not JSON: a monitor
 /// treats that as noise, not an error.
 pub fn parse_line(line: &str) -> Option<LineEvent> {
     let v = json::parse(line).ok()?;
@@ -167,7 +167,7 @@ fn user_action(msg: &Value) -> Option<String> {
 /// Walks the content list from the end and returns the first block that
 /// carries status meaning: a `tool_use` (with its `id`), a `tool_result`
 /// (with its `tool_use_id`), or a `text` block. A `String` content (a plain
-/// user prompt) is `Tail::None` — it is a prompt, not a block we resolve
+/// user prompt) is `Tail::None`: it is a prompt, not a block we resolve
 /// against. This mirrors `assistant_action`'s "last block wins" walk, but
 /// keeps identity (the ids) instead of a display string.
 fn tail_of(msg: &Value) -> Tail {

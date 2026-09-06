@@ -1,6 +1,6 @@
 //! Format adapter for Cursor IDE agent session transcripts.
 //!
-//! # NOTE — RESEARCHED STUB (unverified against a real transcript)
+//! # NOTE: RESEARCHED STUB (unverified against a real transcript)
 //!
 //! **What we know (verified via reverse-engineering):**
 //!
@@ -16,12 +16,12 @@
 //! 2. **Background-agent sub-agent transcripts (JSONL exists!):**
 //!    `~/.cursor/projects/<project-id>/agent-transcripts/<session-id>/subagents/*.jsonl`.
 //!    These exist when Cursor's Background Agent spawns sub-agents. The exact JSONL
-//!    schema is **not publicly documented** — format is derived by analogy with the
+//!    schema is **not publicly documented**: format is derived by analogy with the
 //!    Anthropic/OpenAI wire format that Cursor uses for API calls.
 //!
 //! **Target format:** this parser targets a JSONL file where each line is one
 //! conversation turn in the OpenAI/Anthropic chat completions wire format (dual-shape
-//! support — see examples below). Tool call IDs are stable enough for
+//! support, see examples below). Tool call IDs are stable enough for
 //! `Tail::ToolUse`/`Tail::ToolResult` pairing.
 //!
 //! **Discovery mismatch:** `sessions::World` currently scans `*.jsonl` under the
@@ -107,7 +107,7 @@ pub fn parse_line(line: &str) -> Option<LineEvent> {
     })
 }
 
-/// "Last relevant block wins" — a `tool_use` block reads as `tool: Name`;
+/// "Last relevant block wins": a `tool_use` block reads as `tool: Name`;
 /// otherwise a text preview. Handles both Anthropic blocks and OpenAI
 /// `tool_calls` arrays.
 fn assistant_action(v: &Value) -> Option<String> {
@@ -170,8 +170,8 @@ fn user_action(v: &Value) -> Option<String> {
 /// Classify the final relevant block of an assistant turn for status tracking.
 ///
 /// Priority order (same as `claude::tail_of`):
-/// 1. OpenAI `tool_calls` array — last entry's `id` → `Tail::ToolUse`.
-/// 2. Anthropic `content[].type == "tool_use"` — last such block's `id` → `Tail::ToolUse`.
+/// 1. OpenAI `tool_calls` array: last entry's `id` → `Tail::ToolUse`.
+/// 2. Anthropic `content[].type == "tool_use"`: last such block's `id` → `Tail::ToolUse`.
 /// 3. Trailing `text` block → `Tail::Text`.
 /// 4. Anything else → `Tail::None`.
 fn assistant_tail(v: &Value) -> Tail {
@@ -258,7 +258,7 @@ fn preview(text: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Tests — synthetic transcript lines in the targeted format
+// Tests: synthetic transcript lines in the targeted format
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
@@ -343,7 +343,7 @@ mod tests {
         assert_eq!(ev.action.as_deref(), Some("Looks good!"));
     }
 
-    // ── assistant tool calls — Anthropic blocks shape ─────────────────────
+    // ── assistant tool calls: Anthropic blocks shape ─────────────────────
 
     #[test]
     fn anthropic_tool_use_block() {
@@ -358,7 +358,7 @@ mod tests {
 
     #[test]
     fn anthropic_text_after_tool_use_wins() {
-        // Last block wins — text after tool_use → Tail::Text
+        // Last block wins: text after tool_use → Tail::Text
         let line = r#"{"role":"assistant","content":[{"type":"tool_use","id":"call_x","name":"read_file","input":{}},{"type":"text","text":"Here is the result."}]}"#;
         let ev = parse(line);
         assert_eq!(ev.tail, Tail::Text);
@@ -367,14 +367,14 @@ mod tests {
 
     #[test]
     fn anthropic_tool_use_after_text_wins() {
-        // Last block wins — tool_use after text → Tail::ToolUse
+        // Last block wins: tool_use after text → Tail::ToolUse
         let line = r#"{"role":"assistant","content":[{"type":"text","text":"Running:"},{"type":"tool_use","id":"call_y","name":"bash","input":{}}]}"#;
         let ev = parse(line);
         assert_eq!(ev.tail, Tail::ToolUse("call_y".to_string()));
         assert_eq!(ev.action.as_deref(), Some("tool: bash"));
     }
 
-    // ── assistant tool calls — OpenAI tool_calls shape ────────────────────
+    // ── assistant tool calls: OpenAI tool_calls shape ────────────────────
 
     #[test]
     fn openai_tool_calls_array() {

@@ -1,6 +1,6 @@
 //! Format adapter for GitHub Copilot agent session transcripts.
 //!
-//! # IMPORTANT — UNVERIFIED FORMAT (researched-stub)
+//! # IMPORTANT: UNVERIFIED FORMAT (researched-stub)
 //!
 //! GitHub Copilot does not publish a stable local session-transcript format as
 //! of the knowledge cutoff for this implementation. Specifically:
@@ -13,7 +13,7 @@
 //!   `%APPDATA%\Code\User\globalStorage\github.copilot-chat\copilot-chat.db`
 //!   (Windows) / `~/.config/Code/User/globalStorage/github.copilot-chat/`
 //!   (Linux) / `~/Library/Application Support/Code/User/globalStorage/github.copilot-chat/`
-//!   (macOS) — not JSONL.
+//!   (macOS), not JSONL.
 //! - **Copilot Coding Agent**: runs in GitHub Actions or via the GitHub web
 //!   UI; no canonical local transcript path is documented.
 //!
@@ -66,7 +66,7 @@ use json::Value;
 /// Parse one Copilot session transcript line.
 ///
 /// Returns `None` for non-JSON lines (treated as noise by the monitor).
-/// Unknown `type` values degrade to `Kind::Other`/`Tail::None` — never a crash.
+/// Unknown `type` values degrade to `Kind::Other`/`Tail::None`: never a crash.
 pub fn parse_line(line: &str) -> Option<LineEvent> {
     let v = json::parse(line).ok()?;
 

@@ -3,14 +3,14 @@
 //! A [`World`] scans a Claude Code projects root
 //! (`~/.claude/projects/*/<session>.jsonl`), keeps one [`AgentSession`] per
 //! transcript, and on each [`refresh`](World::refresh) reads only the bytes
-//! appended since last time — a partial trailing line is buffered until its
+//! appended since last time; a partial trailing line is buffered until its
 //! newline arrives. A truncated/rewritten file resets and re-aggregates.
 //!
 //! Ported from agtop's `sessions.rs` (`Session` renamed [`AgentSession`]),
 //! then extended with [`Vendor`], the attention [`Status`] derived from the
 //! transcript tail (§2.4 of the amux-0.3 design), a `first_seen_ms` stamp, and
 //! [`World::refresh_since`] for a bounded cold start. The incremental-tail
-//! state (`offset`, `partial`) and the status-tracking fields stay private —
+//! state (`offset`, `partial`) and the status-tracking fields stay private:
 //! that machinery is the crate's value and neither app should reimplement it.
 
 use crate::claude::{self, Kind, Tail};
@@ -40,7 +40,7 @@ impl Vendor {
     /// Dispatch one transcript line to the vendor's format adapter. This is the
     /// integration seam: every vendor's `parse_line` returns the shared
     /// [`claude::LineEvent`], so the tailing and status machinery stay
-    /// vendor-blind. Adding a variant fails to compile here until it is wired —
+    /// vendor-blind. Adding a variant fails to compile here until it is wired,
     /// by design (§6): the enum forces the dispatch to stay total.
     pub fn parse_line(self, line: &str) -> Option<claude::LineEvent> {
         match self {
@@ -149,7 +149,7 @@ pub struct AgentSession {
     /// Ids of `tool_use` calls not yet matched by a `tool_result`.
     open_tools: Vec<String>,
     /// Timestamp (ms) of the currently-unresolved trailing `tool_use`, if the
-    /// last line is that call — the anchor for the dwell gate.
+    /// last line is that call: the anchor for the dwell gate.
     pending_tool_ts: Option<u64>,
 }
 
@@ -161,7 +161,7 @@ const SUBAGENT_ACTIVE_MS: u64 = 120_000;
 /// this (a huge backlog, or the first read of a large live transcript) we read
 /// only the last `TAIL_CAP` bytes and resync at the next line boundary instead
 /// of `read_to_end`-ing hundreds of MB and blocking the caller's loop. 16 MiB
-/// is thousands of lines — far more tail than any status needs.
+/// is thousands of lines, far more tail than any status needs.
 const TAIL_CAP: u64 = 16 * 1024 * 1024;
 
 impl AgentSession {
@@ -275,12 +275,12 @@ impl AgentSession {
     /// Derive [`Status`] from the accumulated tail state against `now_ms`.
     ///
     /// Pure and deterministic: it reads only fields already computed by
-    /// [`apply`](AgentSession::apply) plus the passed-in `now_ms` — it never
+    /// [`apply`](AgentSession::apply) plus the passed-in `now_ms`; it never
     /// calls the system clock, so the dwell/idle thresholds are testable with
     /// fixed times. `World::refresh` stamps `now` and calls this.
     pub fn derive_status(&self, now_ms: u64) -> Status {
         // Idle wins first: nothing recent enough to claim either way. The
-        // activity clock is normally the last transcript timestamp — but for a
+        // activity clock is normally the last transcript timestamp, but for a
         // vendor that doesn't stamp every turn (aider's markdown log carries
         // only a session-start time) that clock freezes and would trap the
         // session in Idle, so we fall back to the file's mtime.
@@ -351,7 +351,7 @@ impl AgentSession {
         let mut f = std::fs::File::open(&self.path)?;
         // Bound a single tail: when we are further behind than `TAIL_CAP` (a huge
         // backlog, or the first read of a large live transcript), read only the
-        // last `TAIL_CAP` bytes and resync at the next line — never `read_to_end`
+        // last `TAIL_CAP` bytes and resync at the next line, never `read_to_end`
         // hundreds of MB in one loop tick.
         let capped = len - self.offset > TAIL_CAP;
         let seek_to = if capped { len - TAIL_CAP } else { self.offset };
@@ -371,7 +371,7 @@ impl AgentSession {
                     new
                 }
                 None => {
-                    // No line boundary in the window — nothing parseable yet.
+                    // No line boundary in the window: nothing parseable yet.
                     self.partial = new;
                     return Ok(());
                 }
@@ -431,7 +431,7 @@ pub struct World {
 }
 
 impl World {
-    /// A world over a Claude Code projects root — the default vendor. Other
+    /// A world over a Claude Code projects root: the default vendor. Other
     /// vendors use [`World::for_vendor`] with their own transcript root.
     pub fn new(root: PathBuf) -> World {
         World::for_vendor(root, Vendor::ClaudeCode)
@@ -449,13 +449,13 @@ impl World {
 
     /// Discover new transcripts, tail changed ones, refresh subagent
     /// counts, derive each session's status, and re-sort. Missing roots and
-    /// unreadable files are tolerated — a monitor keeps running.
+    /// unreadable files are tolerated; a monitor keeps running.
     pub fn refresh(&mut self) {
         self.refresh_impl(0);
     }
 
     /// Like [`refresh`](World::refresh), but skips *tailing* any transcript
-    /// whose mtime predates `cutoff_ms` — metadata only, no byte reads. amux
+    /// whose mtime predates `cutoff_ms`: metadata only, no byte reads. amux
     /// passes its own process start time so a cold first scan never blocks on
     /// sessions that stopped writing before amux existed (§5 of the design).
     /// Discovery, subagent counts, status, and sort still run for every
@@ -470,7 +470,7 @@ impl World {
         // depth. Claude Code nests one level (root/<project>/<session>.jsonl), but
         // other vendors nest deeper (two, three, four levels down), so a hardcoded
         // depth-2 scan silently missed them. `project_dir` becomes the transcript's
-        // own parent-directory name — the project label for any layout.
+        // own parent-directory name: the project label for any layout.
         let ext = self.vendor.transcript_ext();
         for fpath in scan_transcripts(&self.root, ext, MAX_SCAN_DEPTH) {
             if self.sessions.iter().any(|s| s.path == fpath) {
@@ -526,7 +526,7 @@ impl World {
 const MAX_SCAN_DEPTH: usize = 6;
 
 /// Collect transcript files matching `ext` under `root`, descending at most
-/// `max_depth` directory levels (iterative — no recursion-depth risk).
+/// `max_depth` directory levels (iterative, no recursion-depth risk).
 /// Best-effort: unreadable directories are skipped. A `subagents/` directory is
 /// NOT descended into: a claude session keeps its sub-agent transcripts there and
 /// they are counted separately ([`AgentSession::scan_subagents`]), never as
