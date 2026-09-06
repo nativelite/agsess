@@ -585,9 +585,18 @@ mod scan_tests {
             .map(|n| n.to_string_lossy().into_owned())
             .collect();
 
-        assert!(names.contains(&"sessA.jsonl".to_string()), "depth-2: {names:?}");
-        assert!(names.contains(&"deep.jsonl".to_string()), "depth-4: {names:?}");
-        assert!(!names.contains(&"sub.jsonl".to_string()), "subagents excluded: {names:?}");
+        assert!(
+            names.contains(&"sessA.jsonl".to_string()),
+            "depth-2: {names:?}"
+        );
+        assert!(
+            names.contains(&"deep.jsonl".to_string()),
+            "depth-4: {names:?}"
+        );
+        assert!(
+            !names.contains(&"sub.jsonl".to_string()),
+            "subagents excluded: {names:?}"
+        );
 
         let _ = std::fs::remove_dir_all(&base);
     }

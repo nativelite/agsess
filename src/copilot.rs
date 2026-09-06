@@ -70,7 +70,10 @@ use json::Value;
 pub fn parse_line(line: &str) -> Option<LineEvent> {
     let v = json::parse(line).ok()?;
 
-    let ts_ms = v.get("timestamp").and_then(Value::as_str).and_then(parse_ts);
+    let ts_ms = v
+        .get("timestamp")
+        .and_then(Value::as_str)
+        .and_then(parse_ts);
 
     let model = v
         .get("model")
@@ -123,7 +126,11 @@ pub fn parse_line(line: &str) -> Option<LineEvent> {
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .to_string();
-            (Kind::User, Tail::ToolResult(tool_call_id), Some("tool result".to_string()))
+            (
+                Kind::User,
+                Tail::ToolResult(tool_call_id),
+                Some("tool result".to_string()),
+            )
         }
         _ => (Kind::Other, Tail::None, None),
     };
@@ -151,7 +158,11 @@ fn preview(text: &str) -> String {
             out.push('…');
             break;
         }
-        out.push(if c == '\n' || c == '\r' || c == '\t' { ' ' } else { c });
+        out.push(if c == '\n' || c == '\r' || c == '\t' {
+            ' '
+        } else {
+            c
+        });
     }
     out.trim().to_string()
 }
@@ -216,14 +227,16 @@ mod tests {
         let long = "a".repeat(60);
         let ev = parse_line(&line(&format!(r#""type":"assistant","content":"{long}""#))).unwrap();
         let action = ev.action.unwrap();
-        assert!(action.ends_with('…'), "expected trailing ellipsis, got: {action:?}");
+        assert!(
+            action.ends_with('…'),
+            "expected trailing ellipsis, got: {action:?}"
+        );
         assert!(action.chars().count() <= 47);
     }
 
     #[test]
     fn assistant_no_model() {
-        let ev =
-            parse_line(&line(r#""type":"assistant","content":"Hello""#)).unwrap();
+        let ev = parse_line(&line(r#""type":"assistant","content":"Hello""#)).unwrap();
         assert!(ev.model.is_none());
     }
 
@@ -301,16 +314,17 @@ mod tests {
 
     #[test]
     fn tokens_always_zero() {
-        let ev =
-            parse_line(&line(r#""type":"assistant","content":"answer""#)).unwrap();
+        let ev = parse_line(&line(r#""type":"assistant","content":"answer""#)).unwrap();
         assert_eq!(ev.tokens_in, 0);
         assert_eq!(ev.tokens_out, 0);
     }
 
     #[test]
     fn permission_mode_always_none() {
-        let ev =
-            parse_line(&line(r#""type":"user","content":"q","permission_mode":"ask""#)).unwrap();
+        let ev = parse_line(&line(
+            r#""type":"user","content":"q","permission_mode":"ask""#,
+        ))
+        .unwrap();
         assert!(ev.permission_mode.is_none());
     }
 

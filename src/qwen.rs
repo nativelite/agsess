@@ -276,7 +276,8 @@ mod tests {
 
     #[test]
     fn model_name_extracted() {
-        let line = r#"{"role":"model","content":[{"type":"text","text":"hi"}],"model":"qwen-coder-plus"}"#;
+        let line =
+            r#"{"role":"model","content":[{"type":"text","text":"hi"}],"model":"qwen-coder-plus"}"#;
         let ev = parse_line(line).unwrap();
         assert_eq!(ev.model.as_deref(), Some("qwen-coder-plus"));
     }

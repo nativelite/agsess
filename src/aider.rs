@@ -195,17 +195,10 @@ fn parse_aider_ts(s: &str) -> Option<u64> {
     {
         return None;
     }
-    let num = |range: std::ops::Range<usize>| -> Option<i64> {
-        s.get(range)?.parse::<i64>().ok()
-    };
+    let num = |range: std::ops::Range<usize>| -> Option<i64> { s.get(range)?.parse::<i64>().ok() };
     let (y, mo, d) = (num(0..4)?, num(5..7)?, num(8..10)?);
     let (h, mi, sec) = (num(11..13)?, num(14..16)?, num(17..19)?);
-    if !(1..=12).contains(&mo)
-        || !(1..=31).contains(&d)
-        || h > 23
-        || mi > 59
-        || sec > 60
-    {
+    if !(1..=12).contains(&mo) || !(1..=31).contains(&d) || h > 23 || mi > 59 || sec > 60 {
         return None;
     }
     let days = days_from_civil(y, mo, d);
@@ -286,7 +279,10 @@ mod tests {
         let ev = parse_line("> Tell me what this function does.").unwrap();
         assert_eq!(ev.kind, Kind::User);
         assert_eq!(ev.tail, Tail::None);
-        assert_eq!(ev.action.as_deref(), Some("> Tell me what this function does."));
+        assert_eq!(
+            ev.action.as_deref(),
+            Some("> Tell me what this function does.")
+        );
         assert_eq!(ev.ts_ms, None);
         assert_eq!(ev.tokens_in, 0);
     }
@@ -310,7 +306,10 @@ mod tests {
         let ev = parse_line(&long).unwrap();
         assert_eq!(ev.kind, Kind::User);
         let action = ev.action.unwrap();
-        assert!(action.ends_with('…'), "should end with ellipsis, got: {action:?}");
+        assert!(
+            action.ends_with('…'),
+            "should end with ellipsis, got: {action:?}"
+        );
         assert!(action.chars().count() <= 50); // "> " + 46 chars + "…"
     }
 

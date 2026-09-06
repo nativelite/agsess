@@ -100,8 +100,8 @@ pub fn parse_line(line: &str) -> Option<LineEvent> {
         tokens_in: tok("promptTokens"),
         tokens_out: tok("completionTokens"),
         action,
-        cwd: None,            // Cursor does not record cwd in transcripts
-        branch: None,         // Cursor does not record git branch in transcripts
+        cwd: None,             // Cursor does not record cwd in transcripts
+        branch: None,          // Cursor does not record git branch in transcripts
         permission_mode: None, // no equivalent in Cursor's agent model
         tail,
     })
@@ -515,8 +515,7 @@ mod tests {
     #[test]
     fn assistant_text_drives_waiting_prompt() {
         // Kind::Assistant + Tail::Text → derive_status returns WaitingPrompt
-        let ev =
-            parse(r#"{"role":"assistant","content":[{"type":"text","text":"All done!"}]}"#);
+        let ev = parse(r#"{"role":"assistant","content":[{"type":"text","text":"All done!"}]}"#);
         assert_eq!(ev.kind, Kind::Assistant);
         assert_eq!(ev.tail, Tail::Text);
     }
@@ -524,7 +523,9 @@ mod tests {
     #[test]
     fn unresolved_tool_use_drives_working_or_waiting_approval() {
         // Kind::Assistant + Tail::ToolUse → Working or WaitingApproval (dwell-gated)
-        let ev = parse(r#"{"role":"assistant","content":[{"type":"tool_use","id":"call_z","name":"bash","input":{}}]}"#);
+        let ev = parse(
+            r#"{"role":"assistant","content":[{"type":"tool_use","id":"call_z","name":"bash","input":{}}]}"#,
+        );
         assert_eq!(ev.kind, Kind::Assistant);
         assert!(matches!(ev.tail, Tail::ToolUse(_)));
     }

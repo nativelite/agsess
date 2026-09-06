@@ -341,14 +341,23 @@ fn refresh_since_skips_tailing_stale_files_but_still_discovers() {
     // for the fleet-scale hang: the first poll after a cold start must not full-
     // read every historical transcript.
     w.refresh();
-    assert_eq!(w.sessions[0].assistant_msgs, 0, "stale backlog is not re-read after catch-up");
+    assert_eq!(
+        w.sessions[0].assistant_msgs, 0,
+        "stale backlog is not re-read after catch-up"
+    );
     // But genuinely new bytes appended after catch-up are still tailed.
     let path = td.path().join("p").join("s1.jsonl");
-    let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+    let mut f = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .unwrap();
     writeln!(f, "{ASSISTANT_TEXT}").unwrap();
     drop(f);
     w.refresh();
-    assert_eq!(w.sessions[0].assistant_msgs, 1, "new activity after catch-up is tailed");
+    assert_eq!(
+        w.sessions[0].assistant_msgs, 1,
+        "new activity after catch-up is tailed"
+    );
 }
 
 #[test]
@@ -451,6 +460,10 @@ fn aider_md_is_discovered_and_escapes_the_idle_trap() {
     // The file was just written, so despite the absent timestamps it is fresh:
     // the mtime fallback keeps it out of Idle and lets the text tail surface.
     let now = agsess::sessions::now_ms();
-    assert_ne!(s.derive_status(now), Status::Idle, "mtime fallback, not the idle trap");
+    assert_ne!(
+        s.derive_status(now),
+        Status::Idle,
+        "mtime fallback, not the idle trap"
+    );
     assert_eq!(s.derive_status(now), Status::WaitingPrompt);
 }

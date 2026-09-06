@@ -241,7 +241,9 @@ mod tests {
 
     #[test]
     fn json_without_role_is_other() {
-        let ev = parse_line(r#"{"id":"x","model":{"providerID":"anthropic","modelID":"claude-3"}}"#).unwrap();
+        let ev =
+            parse_line(r#"{"id":"x","model":{"providerID":"anthropic","modelID":"claude-3"}}"#)
+                .unwrap();
         assert_eq!(ev.kind, Kind::Other);
     }
 
@@ -280,7 +282,8 @@ mod tests {
 
     #[test]
     fn assistant_role_maps_to_assistant_kind() {
-        let line = r#"{"role":"assistant","timestamp":2000,"content":[{"type":"text","text":"Hello!"}]}"#;
+        let line =
+            r#"{"role":"assistant","timestamp":2000,"content":[{"type":"text","text":"Hello!"}]}"#;
         let ev = parse_line(line).unwrap();
         assert_eq!(ev.kind, Kind::Assistant);
     }
@@ -448,9 +451,8 @@ mod tests {
     #[test]
     fn long_text_action_is_truncated() {
         let long = "a".repeat(100);
-        let line = format!(
-            r#"{{"role":"assistant","content":[{{"type":"text","text":"{long}"}}]}}"#
-        );
+        let line =
+            format!(r#"{{"role":"assistant","content":[{{"type":"text","text":"{long}"}}]}}"#);
         let ev = parse_line(&line).unwrap();
         let action = ev.action.unwrap();
         assert!(action.contains('…'));

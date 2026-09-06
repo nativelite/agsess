@@ -77,8 +77,8 @@ pub fn parse_line(line: &str) -> Option<LineEvent> {
         tokens_in: tok("promptTokenCount"),
         tokens_out: tok("candidatesTokenCount"),
         action,
-        cwd: None,    // Gemini CLI does not record cwd in transcripts
-        branch: None, // Gemini CLI does not record git branch in transcripts
+        cwd: None,             // Gemini CLI does not record cwd in transcripts
+        branch: None,          // Gemini CLI does not record git branch in transcripts
         permission_mode: None, // no equivalent in Gemini CLI
         tail,
     })
@@ -100,9 +100,7 @@ fn model_action(parts: &[Value]) -> Option<String> {
 }
 
 fn user_action(parts: &[Value]) -> Option<String> {
-    let has_response = parts
-        .iter()
-        .any(|p| p.get("functionResponse").is_some());
+    let has_response = parts.iter().any(|p| p.get("functionResponse").is_some());
     if has_response {
         return Some("tool result".to_string());
     }
@@ -332,7 +330,8 @@ mod tests {
 
     #[test]
     fn timestamp_with_millis() {
-        let line = r#"{"role":"user","parts":[{"text":"hi"}],"timestamp":"2024-06-01T12:00:00.500Z"}"#;
+        let line =
+            r#"{"role":"user","parts":[{"text":"hi"}],"timestamp":"2024-06-01T12:00:00.500Z"}"#;
         let ev = parse(line);
         assert!(ev.ts_ms.is_some());
         // 2024-06-01T12:00:00.500Z → should end in 500 ms

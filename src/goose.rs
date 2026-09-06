@@ -58,12 +58,12 @@ pub fn parse_line(line: &str) -> Option<LineEvent> {
     Some(LineEvent {
         kind,
         ts_ms,
-        model: None,          // not stored in Goose transcripts
-        tokens_in: 0,         // not stored in Goose transcripts
-        tokens_out: 0,        // not stored in Goose transcripts
+        model: None,   // not stored in Goose transcripts
+        tokens_in: 0,  // not stored in Goose transcripts
+        tokens_out: 0, // not stored in Goose transcripts
         action,
-        cwd: None,            // not stored in Goose transcripts
-        branch: None,         // not stored in Goose transcripts
+        cwd: None,             // not stored in Goose transcripts
+        branch: None,          // not stored in Goose transcripts
         permission_mode: None, // no equivalent concept in Goose
         tail,
     })
@@ -170,7 +170,8 @@ mod tests {
 
     const ASSISTANT_TEXT: &str = r#"{"role":"assistant","content":[{"type":"text","text":"All checks pass."}],"created":1756483210}"#;
 
-    const USER_PROMPT: &str = r#"{"role":"user","content":[{"type":"text","text":"run clippy"}],"created":1756483190}"#;
+    const USER_PROMPT: &str =
+        r#"{"role":"user","content":[{"type":"text","text":"run clippy"}],"created":1756483190}"#;
 
     const USER_PROMPT_STRING: &str =
         r#"{"role":"user","content":"run clippy","created":1756483190}"#;
@@ -234,9 +235,10 @@ mod tests {
 
     #[test]
     fn unknown_role_degrades_to_other() {
-        let ev =
-            parse_line(r#"{"role":"system","content":[{"type":"text","text":"You are..."}],"created":1}"#)
-                .unwrap();
+        let ev = parse_line(
+            r#"{"role":"system","content":[{"type":"text","text":"You are..."}],"created":1}"#,
+        )
+        .unwrap();
         assert_eq!(ev.kind, Kind::Other);
         assert_eq!(ev.action, None);
         assert_eq!(ev.tail, Tail::None);
@@ -251,9 +253,10 @@ mod tests {
 
     #[test]
     fn created_zero_is_not_a_timestamp() {
-        let ev =
-            parse_line(r#"{"role":"assistant","content":[{"type":"text","text":"hi"}],"created":0}"#)
-                .unwrap();
+        let ev = parse_line(
+            r#"{"role":"assistant","content":[{"type":"text","text":"hi"}],"created":0}"#,
+        )
+        .unwrap();
         assert!(ev.ts_ms.is_none());
     }
 

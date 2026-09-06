@@ -54,7 +54,10 @@ use json::Value;
 /// observable: the same contract as [`crate::claude::parse_line`].
 pub fn parse_line(line: &str) -> Option<LineEvent> {
     let v = json::parse(line).ok()?;
-    let ts_ms = v.get("timestamp").and_then(Value::as_str).and_then(parse_ts);
+    let ts_ms = v
+        .get("timestamp")
+        .and_then(Value::as_str)
+        .and_then(parse_ts);
     let payload = v.get("payload")?;
 
     match v.get("type").and_then(Value::as_str) {
@@ -320,9 +323,7 @@ fn parse_event_msg(p: &Value, ts_ms: Option<u64>) -> Option<LineEvent> {
 
 /// Per-turn token totals. Prefer `turn_token_usage` (this turn) over `usage` (cumulative).
 fn parse_token_usage_record(p: &Value, ts_ms: Option<u64>) -> Option<LineEvent> {
-    let usage = p
-        .get("turn_token_usage")
-        .or_else(|| p.get("usage"))?;
+    let usage = p.get("turn_token_usage").or_else(|| p.get("usage"))?;
     let tokens_in = tok(usage, "input_tokens");
     let tokens_out = tok(usage, "output_tokens");
     if tokens_in == 0 && tokens_out == 0 {
