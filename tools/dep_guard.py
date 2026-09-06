@@ -7,9 +7,10 @@ checking every dependency table is a complete guarantee — no source scan neede
 
 agsess is an *app-variant* crate: it is allowed to depend on other nativelite
 org crates (here, `json`) but on nothing from crates.io. So the rule is not
-"empty" but "every dependency is an org crate", identified by a `git` source
-pointing at ``github.com/nativelite/``. A plain version string, a `path`, or
-any non-nativelite git/registry source is a third-party dependency and fails.
+"empty" but "every dependency is an org crate", identified by a
+``package = "nativelite-*"`` registry dep (with a version: the crates.io
+publish form) or a git dep on ``github.com/nativelite/``. A foreign crates.io
+name or git URL is a third-party dependency and fails.
 
 ``[dev-dependencies]`` must still be empty: nativelite tests use the built-in
 ``#[test]`` harness with hand-authored vectors, which needs nothing external.
@@ -28,11 +29,15 @@ ORG_GIT_PREFIX = "https://github.com/nativelite/"
 
 
 def is_org_dep(spec: object) -> bool:
-    """True iff `spec` is a nativelite org crate (a git dep on the org)."""
+    """True iff `spec` is a nativelite org crate: a ``package = "nativelite-*"``
+    registry dep (with a version, the publish form) or a git dep on the org."""
     if not isinstance(spec, dict):
         return False  # a bare version string is a crates.io dep
     git = spec.get("git")
-    return isinstance(git, str) and git.startswith(ORG_GIT_PREFIX)
+    if isinstance(git, str) and git.startswith(ORG_GIT_PREFIX):
+        return True
+    pkg = spec.get("package") or ""
+    return pkg.startswith("nativelite-") and bool(spec.get("version"))
 
 
 def check_deps(table_name: str, deps: object, problems: list[str]) -> None:

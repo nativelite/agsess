@@ -1,5 +1,5 @@
 [package]
-name = "agsess"
+name = "nativelite-agsess"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.70"
@@ -13,7 +13,7 @@ categories = ["command-line-utilities", "parser-implementations"]
 # allowed is the org crate `json` (the app-variant rule): do not add anything
 # from crates.io here.
 [dependencies]
-json = { git = "https://github.com/nativelite/json-rs", branch = "main" }
+json = { package = "nativelite-json", version = "0.1", path = "../json-rs" }
 
 [lib]
 name = "agsess"

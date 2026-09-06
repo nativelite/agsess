@@ -437,7 +437,7 @@ impl World {
         World::for_vendor(root, Vendor::ClaudeCode)
     }
 
-    /// A world over `root` whose transcripts were written by `vendor`. amux
+    /// A world over `root` whose transcripts were written by `vendor`. atrium
     /// holds one world per vendor root and merges their sessions for display.
     pub fn for_vendor(root: PathBuf, vendor: Vendor) -> World {
         World {
@@ -455,9 +455,9 @@ impl World {
     }
 
     /// Like [`refresh`](World::refresh), but skips *tailing* any transcript
-    /// whose mtime predates `cutoff_ms`: metadata only, no byte reads. amux
+    /// whose mtime predates `cutoff_ms`: metadata only, no byte reads. atrium
     /// passes its own process start time so a cold first scan never blocks on
-    /// sessions that stopped writing before amux existed (§5 of the design).
+    /// sessions that stopped writing before atrium existed (§5 of the design).
     /// Discovery, subagent counts, status, and sort still run for every
     /// session; only the (potentially large) tail read is skipped.
     pub fn refresh_since(&mut self, cutoff_ms: u64) {
