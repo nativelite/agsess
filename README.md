@@ -6,7 +6,7 @@ attention `Status`) out.
 
 Part of the nativelite **agent terminal** suite. It is the reader that
 [agtop](https://github.com/nativelite/agtop) and
-[atrium](https://github.com/nativelite/amux) share: agtop renders it as a live
+[atrium](https://github.com/nativelite/atrium) share: agtop renders it as a live
 table; atrium binds each pane to the session its hosted agent is writing and
 tints the pane border when an agent is waiting on the human.
 

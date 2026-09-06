@@ -8,7 +8,7 @@
 //!
 //! Ported from agtop's `sessions.rs` (`Session` renamed [`AgentSession`]),
 //! then extended with [`Vendor`], the attention [`Status`] derived from the
-//! transcript tail (§2.4 of the amux-0.3 design), a `first_seen_ms` stamp, and
+//! transcript tail (§2.4 of the atrium-0.3 design), a `first_seen_ms` stamp, and
 //! [`World::refresh_since`] for a bounded cold start. The incremental-tail
 //! state (`offset`, `partial`) and the status-tracking fields stay private:
 //! that machinery is the crate's value and neither app should reimplement it.

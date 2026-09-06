@@ -39,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `json`, with zero third-party/crates.io deps).
 
 Depends only on the org crate `json` (the app-variant rule); third-party
-dependencies remain forbidden. M1 of the amux 0.3 agent-aware feature: the
+dependencies remain forbidden. M1 of the atrium 0.3 agent-aware feature: the
 shared session reader extracted so agtop (later) and atrium can both consume it.
 
 [Unreleased]: https://github.com/nativelite/agsess/compare/v0.1.0...HEAD
