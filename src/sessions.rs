@@ -61,7 +61,8 @@ impl Vendor {
     ///
     /// NOTE: opencode and cursor-agent (main sessions) persist to SQLite, not a
     /// tailable text file, so the file scan never finds them and their discovery
-    /// is deferred (see VENDORS.md). Their `parse_line` is still wired above and
+    /// is deferred: the file scan cannot reach a SQLite store. Their `parse_line`
+    /// is still wired above and
     /// unit-tested against synthetic lines.
     fn transcript_ext(self) -> &'static str {
         match self {
