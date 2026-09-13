@@ -273,6 +273,21 @@ impl AgentSession {
         }
     }
 
+    /// Does the transcript end on a `tool_use` still awaiting its `tool_result`?
+    ///
+    /// That is a tool running, or the agent blocked on the human: a permission
+    /// prompt, a question, a plan approval. Unlike [`derive_status`], this never
+    /// decays to [`Status::Idle`] with time — a dialog left open for minutes is
+    /// still open, and anything that types into the pane would answer it.
+    ///
+    /// [`derive_status`]: AgentSession::derive_status
+    pub fn awaiting_tool(&self) -> bool {
+        match (self.last_kind, &self.last_tail) {
+            (Some(Kind::Assistant), Tail::ToolUse(id)) => self.open_tools.iter().any(|t| t == id),
+            _ => false,
+        }
+    }
+
     /// Derive [`Status`] from the accumulated tail state against `now_ms`.
     ///
     /// Pure and deterministic: it reads only fields already computed by

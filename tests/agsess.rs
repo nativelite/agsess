@@ -325,6 +325,33 @@ fn status_stale_is_idle() {
 }
 
 #[test]
+fn awaiting_tool_outlives_idle_decay() {
+    // An unresolved trailing tool_use is a question/approval dialog or a running
+    // tool. derive_status decays it to Idle after IDLE_MS, but awaiting_tool must
+    // still report it: a consumer that types into an "Idle" pane would otherwise
+    // answer the open dialog with its Enter.
+    let stale = BASE_TS + IDLE_MS + 10_000;
+    for fixture in ["pending-approval-default.jsonl", "unresolved-auto.jsonl"] {
+        let (_td, w) = tail_fixture(fixture);
+        let s = &w.sessions[0];
+        assert_eq!(s.derive_status(stale), Status::Idle, "{fixture}");
+        assert!(s.awaiting_tool(), "{fixture}");
+    }
+}
+
+#[test]
+fn awaiting_tool_false_once_the_turn_ends_or_the_tool_resolves() {
+    for fixture in [
+        "assistant-text-end.jsonl",
+        "user-last.jsonl",
+        "stale-idle.jsonl",
+    ] {
+        let (_td, w) = tail_fixture(fixture);
+        assert!(!w.sessions[0].awaiting_tool(), "{fixture}");
+    }
+}
+
+#[test]
 fn refresh_since_skips_tailing_stale_files_but_still_discovers() {
     let td = TempDir::new("since");
     write_session(td.path(), "p", "s1", &[USER_PROMPT, ASSISTANT_TEXT]);
