@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `AgentSession::awaiting_tool()`: whether the transcript ends on a `tool_use`
+  still awaiting its result (a running tool, or a question / permission /
+  plan-approval dialog). Unlike `derive_status`, it never decays to `Idle` with
+  time, so a consumer that types into a pane can tell an open dialog from a
+  genuinely idle prompt.
+
 ## [0.1.0] - 2026-08-29
 
 ### Added
