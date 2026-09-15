@@ -369,6 +369,9 @@ impl AgentSession {
         self.skip_line = false;
     }
 
+    /// [`tail_from`](Self::tail_from) with its own stat. A refresh stats each
+    /// transcript once and passes the metadata in; the tests tail directly.
+    #[cfg(test)]
     fn tail(&mut self) -> std::io::Result<()> {
         let meta = std::fs::metadata(&self.path)?;
         self.tail_from(&meta)
