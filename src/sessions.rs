@@ -371,6 +371,12 @@ impl AgentSession {
 
     fn tail(&mut self) -> std::io::Result<()> {
         let meta = std::fs::metadata(&self.path)?;
+        self.tail_from(&meta)
+    }
+
+    /// [`tail`](Self::tail) with the transcript's metadata already in hand, so a
+    /// refresh that has just stat'ed the file doesn't stat it again.
+    fn tail_from(&mut self, meta: &std::fs::Metadata) -> std::io::Result<()> {
         self.mtime_ms = to_ms(meta.modified()?);
         let len = meta.len();
         if len < self.offset {
@@ -513,8 +519,12 @@ impl World {
         // depth-2 scan silently missed them. `project_dir` becomes the transcript's
         // own parent-directory name: the project label for any layout.
         let ext = self.vendor.transcript_ext();
+        // A set, not a scan of `sessions` per path: that was quadratic in the
+        // history size (measured ~10 ms a refresh at ~440 sessions).
+        let known: std::collections::HashSet<PathBuf> =
+            self.sessions.iter().map(|s| s.path.clone()).collect();
         for fpath in scan_transcripts(&self.root, ext, MAX_SCAN_DEPTH) {
-            if self.sessions.iter().any(|s| s.path == fpath) {
+            if known.contains(&fpath) {
                 continue;
             }
             let id = fpath
@@ -530,32 +540,31 @@ impl World {
             s.first_seen_ms = now;
             self.sessions.push(s);
         }
-        self.sessions.retain(|s| s.path.exists());
-        for s in &mut self.sessions {
+        // One metadata call per session decides both whether its transcript still
+        // exists (a session whose file can't be stat'ed is dropped, exactly as the
+        // old `path.exists()` pass did) and what to tail.
+        self.sessions.retain_mut(|s| {
+            let Ok(m) = std::fs::metadata(&s.path) else {
+                return false;
+            };
             if cutoff_ms == 0 {
-                let _ = s.tail();
+                let _ = s.tail_from(&m);
             } else {
                 // Metadata-only: learn mtime cheaply; tail only if fresh.
-                match std::fs::metadata(&s.path) {
-                    Ok(m) => {
-                        s.mtime_ms = m.modified().map(to_ms).unwrap_or(s.mtime_ms);
-                        if s.mtime_ms >= cutoff_ms {
-                            let _ = s.tail();
-                        } else if s.offset == 0 {
-                            // Stale and never read: skip the (possibly huge)
-                            // backlog, but mark it caught up so a later refresh()
-                            // tails only new bytes instead of re-reading history.
-                            s.mark_caught_up(m.len());
-                        }
-                    }
-                    Err(_) => {
-                        let _ = s.tail();
-                    }
+                s.mtime_ms = m.modified().map(to_ms).unwrap_or(s.mtime_ms);
+                if s.mtime_ms >= cutoff_ms {
+                    let _ = s.tail_from(&m);
+                } else if s.offset == 0 {
+                    // Stale and never read: skip the (possibly huge)
+                    // backlog, but mark it caught up so a later refresh()
+                    // tails only new bytes instead of re-reading history.
+                    s.mark_caught_up(m.len());
                 }
             }
             s.scan_subagents(now);
             s.status = s.derive_status(now);
-        }
+            true
+        });
         self.sessions.sort_by_key(|s| std::cmp::Reverse(s.mtime_ms));
     }
 }
@@ -581,7 +590,16 @@ fn scan_transcripts(root: &std::path::Path, ext: &str, max_depth: usize) -> Vec<
         };
         for entry in entries.flatten() {
             let p = entry.path();
-            if p.is_dir() {
+            // The listing already carries each entry's type (on Windows it comes
+            // with the directory read itself); `Path::is_dir` stat'ed every entry
+            // again, and that walk was half of a refresh. A symlink still follows
+            // its target, as `is_dir` did.
+            let is_dir = match entry.file_type() {
+                Ok(t) if t.is_symlink() => p.is_dir(),
+                Ok(t) => t.is_dir(),
+                Err(_) => p.is_dir(),
+            };
+            if is_dir {
                 let is_subagents = p.file_name().is_some_and(|n| n == "subagents");
                 if depth < max_depth && !is_subagents {
                     stack.push((p, depth + 1));
