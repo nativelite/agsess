@@ -139,6 +139,10 @@ pub struct AgentSession {
     pub subagents_active: usize,
     offset: u64,
     partial: Vec<u8>,
+    /// Bytes up to the next newline belong to a line we dropped (it outgrew
+    /// [`TAIL_CAP`], or a capped read started inside it). `partial` is empty
+    /// whenever this is set.
+    skip_line: bool,
     // --- private status-derivation state, updated line by line ---
     /// Last permission mode seen (from `permission-mode` records or the
     /// inline `permissionMode` on `user` lines).
@@ -161,9 +165,16 @@ const SUBAGENT_ACTIVE_MS: u64 = 120_000;
 /// of a transcript to derive status, so when a session is further behind than
 /// this (a huge backlog, or the first read of a large live transcript) we read
 /// only the last `TAIL_CAP` bytes and resync at the next line boundary instead
-/// of `read_to_end`-ing hundreds of MB and blocking the caller's loop. 16 MiB
-/// is thousands of lines, far more tail than any status needs.
-const TAIL_CAP: u64 = 16 * 1024 * 1024;
+/// of `read_to_end`-ing hundreds of MB and blocking the caller's loop. It also
+/// bounds `partial`: a single line longer than this is skipped, not buffered.
+/// 4 MiB clears the longest real lines (image tool results reach ~3 MiB; none
+/// of 604k measured lines exceeded 4 MiB), so no real event is skipped, while
+/// keeping a monitor's largest routine allocation small: 16 MiB was the one
+/// that failed first when a fleet's builds exhausted system commit.
+const TAIL_CAP: u64 = 4 * 1024 * 1024;
+/// Upper bound on `open_tools`. A tool call interrupted before its result never
+/// resolves, so without a bound the list grows for the life of the session.
+const MAX_OPEN_TOOLS: usize = 256;
 
 impl AgentSession {
     fn new(vendor: Vendor, path: PathBuf, id: String, project_dir: String) -> AgentSession {
@@ -189,6 +200,7 @@ impl AgentSession {
             subagents_active: 0,
             offset: 0,
             partial: Vec::new(),
+            skip_line: false,
             perm_mode: None,
             last_kind: None,
             last_tail: Tail::None,
@@ -245,6 +257,9 @@ impl AgentSession {
         match &ev.tail {
             Tail::ToolUse(id) => {
                 if !id.is_empty() {
+                    if self.open_tools.len() == MAX_OPEN_TOOLS {
+                        self.open_tools.remove(0); // the oldest: likely interrupted
+                    }
                     self.open_tools.push(id.clone());
                 }
             }
@@ -351,6 +366,7 @@ impl AgentSession {
     fn mark_caught_up(&mut self, len: u64) {
         self.offset = len;
         self.partial.clear();
+        self.skip_line = false;
     }
 
     fn tail(&mut self) -> std::io::Result<()> {
@@ -375,28 +391,30 @@ impl AgentSession {
         let mut new = Vec::with_capacity((len - seek_to) as usize);
         f.read_to_end(&mut new)?;
         self.offset = len;
-        // Assemble the byte buffer and the parse start. When capped, `new` begins
-        // mid-line, so drop the leading fragment (parse after the first newline)
-        // and discard any stale partial; otherwise continue from the saved partial.
-        let mut start = 0;
-        let buf = if capped {
+        // A capped window begins mid-line: that fragment is unparseable, so drop
+        // any stale partial and skip to the first newline, the same way the rest
+        // of an overlong line is skipped.
+        if capped {
             self.partial.clear();
+            self.skip_line = true;
+        }
+        let mut start = 0;
+        if self.skip_line {
             match new.iter().position(|&b| b == b'\n') {
                 Some(nl) => {
                     start = nl + 1;
-                    new
+                    self.skip_line = false;
                 }
-                None => {
-                    // No line boundary in the window: nothing parseable yet.
-                    self.partial = new;
-                    return Ok(());
-                }
+                None => return Ok(()), // still inside the dropped line
             }
+        }
+        // `partial` is always empty while skipping, so `start` indexes `buf` too.
+        let mut buf = std::mem::take(&mut self.partial);
+        if buf.is_empty() {
+            buf = new;
         } else {
-            let mut buf = std::mem::take(&mut self.partial);
             buf.extend_from_slice(&new);
-            buf
-        };
+        }
         while let Some(nl) = buf[start..].iter().position(|&b| b == b'\n') {
             let line = &buf[start..start + nl];
             if let Ok(text) = std::str::from_utf8(line) {
@@ -406,7 +424,14 @@ impl AgentSession {
             }
             start += nl + 1;
         }
-        self.partial = buf[start..].to_vec();
+        // Hold an unfinished line for the next read, unless it has already
+        // outgrown the cap: then drop it and resync at its end. Buffering it
+        // instead grew `partial` for as long as the line kept growing.
+        if (buf.len() - start) as u64 > TAIL_CAP {
+            self.skip_line = true;
+        } else {
+            self.partial = buf[start..].to_vec();
+        }
         Ok(())
     }
 
@@ -577,6 +602,95 @@ fn to_ms(t: SystemTime) -> u64 {
     t.duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis().min(u64::MAX as u128) as u64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod bound_tests {
+    use super::{AgentSession, Vendor, MAX_OPEN_TOOLS, TAIL_CAP};
+    use std::io::Write;
+    use std::path::PathBuf;
+
+    const USER_PROMPT: &str = r#"{"type":"user","timestamp":"2026-08-28T20:36:40.000Z","message":{"role":"user","content":"go"}}"#;
+
+    fn session(tag: &str) -> (PathBuf, AgentSession) {
+        let base = std::env::temp_dir().join(format!("agsess_bound_{tag}_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let path = base.join("s.jsonl");
+        std::fs::write(&path, b"").unwrap();
+        let s = AgentSession::new(Vendor::ClaudeCode, path, "s".into(), "p".into());
+        (base, s)
+    }
+
+    fn append(s: &AgentSession, bytes: &[u8]) {
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&s.path)
+            .unwrap();
+        f.write_all(bytes).unwrap();
+    }
+
+    #[test]
+    fn an_unterminated_line_never_grows_partial_past_the_cap() {
+        // A line arriving in sub-cap chunks, each tick below TAIL_CAP (so no read
+        // is capped), must not accumulate in `partial` without bound: that was a
+        // per-session buffer growing as long as the line did.
+        let (base, mut s) = session("partial");
+        let chunk = vec![b'x'; (TAIL_CAP / 2) as usize];
+        for _ in 0..5 {
+            append(&s, &chunk);
+            s.tail().unwrap();
+            assert!(
+                s.partial.len() as u64 <= TAIL_CAP,
+                "partial {} > cap {TAIL_CAP}",
+                s.partial.len()
+            );
+        }
+        // The overlong line is skipped, and parsing resyncs at the next line.
+        append(&s, format!("\n{USER_PROMPT}\n").as_bytes());
+        s.tail().unwrap();
+        assert_eq!(s.user_msgs, 1);
+        assert!(s.partial.is_empty());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn a_capped_read_without_a_newline_holds_nothing() {
+        // Further behind than the cap, with no line boundary in the window: the
+        // window is mid-line, so keep none of it rather than a cap-sized partial.
+        let (base, mut s) = session("capped");
+        append(&s, &vec![b'y'; TAIL_CAP as usize + 16]);
+        s.tail().unwrap();
+        assert!(s.partial.is_empty());
+        append(&s, format!("\n{USER_PROMPT}\n").as_bytes());
+        s.tail().unwrap();
+        assert_eq!(s.user_msgs, 1);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn open_tools_is_bounded_and_keeps_the_newest() {
+        // Interrupted tool calls never get a tool_result; their ids must not
+        // pile up forever. The newest id survives so status still resolves.
+        let (base, mut s) = session("tools");
+        let mut body = String::new();
+        let n = MAX_OPEN_TOOLS + 50;
+        for i in 0..n {
+            body.push_str(&format!(
+                r#"{{"type":"assistant","timestamp":"2026-08-28T20:36:50.000Z","message":{{"role":"assistant","content":[{{"type":"tool_use","id":"t{i}","name":"Bash","input":{{}}}}]}}}}"#
+            ));
+            body.push('\n');
+        }
+        append(&s, body.as_bytes());
+        s.tail().unwrap();
+        assert!(
+            s.open_tools.len() <= MAX_OPEN_TOOLS,
+            "{}",
+            s.open_tools.len()
+        );
+        assert!(s.awaiting_tool(), "the newest open tool must be kept");
+        let _ = std::fs::remove_dir_all(&base);
+    }
 }
 
 #[cfg(test)]

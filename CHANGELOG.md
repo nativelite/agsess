@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A transcript line that never ends can no longer grow memory without bound.**
+  An unfinished trailing line was buffered in full and extended on every read,
+  so one very long line grew its session's buffer for as long as the line did.
+  A line longer than the tail cap is now skipped, and parsing resumes at the
+  next newline. A capped read that finds no newline also keeps nothing, where
+  it used to keep the whole window.
+- **Interrupted tool calls no longer accumulate.** The ids of unresolved
+  `tool_use` calls are capped at 256; the oldest is dropped first.
+
+### Changed
+- **The single-read tail cap is 4 MiB, down from 16 MiB.** None of 604k measured
+  Claude Code transcript lines exceeded 4 MiB (the longest, image tool results,
+  reach about 3 MiB), so no real event is skipped. The monitor's largest routine
+  allocation shrinks 4x; the 16 MiB read was the first allocation to fail when a
+  fleet's parallel builds exhausted system memory.
+
 ## [0.2.0] - 2026-09-14
 
 ### Added
