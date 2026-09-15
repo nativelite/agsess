@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-15
+
 ### Fixed
 - **A transcript line that never ends can no longer grow memory without bound.**
   An unfinished trailing line was buffered in full and extended on every read,
@@ -68,6 +70,7 @@ Depends only on the org crate `json` (the app-variant rule); third-party
 dependencies remain forbidden. M1 of the atrium 0.3 agent-aware feature: the
 shared session reader extracted so agtop (later) and atrium can both consume it.
 
-[Unreleased]: https://github.com/nativelite/agsess/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/nativelite/agsess/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/nativelite/agsess/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/nativelite/agsess/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/nativelite/agsess/releases/tag/v0.1.0

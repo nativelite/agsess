@@ -1,6 +1,6 @@
 [package]
 name = "nativelite-agsess"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 rust-version = "1.70"
 description = "Local agent session state: the JSONL transcripts a coding-agent CLI writes to the user's own disk in, a snapshot of AgentSessions (with a derived attention Status) out. Zero third-party dependencies: depends only on the nativelite json crate."
