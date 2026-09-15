@@ -7,10 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-09-15
+
 ### Changed
 - **`World::refresh` is about 4x cheaper on a large history.** Measured on a real
-  Claude Code root with 439 transcripts (Windows, release build): ~135 ms a
-  refresh before, ~35 ms after. The discovery walk takes each entry's type from
+  Claude Code root with 439 transcripts (Windows, release build, five refreshes
+  each, a one-off timing probe not yet checked in): ~135 ms a refresh before,
+  ~30–40 ms after. The discovery walk takes each entry's type from
   the directory listing instead of stat'ing it again (symlinks still follow
   their target), known transcripts are looked up in a set instead of a linear
   scan per path, and one metadata call per session both drops a vanished
